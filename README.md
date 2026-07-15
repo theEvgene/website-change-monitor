@@ -4,13 +4,44 @@
 
 ## Текущее состояние
 
-Проект находится на этапе продуктового и архитектурного планирования. Реализация приложения ещё не начиналась.
+Реализация началась с локальной оболочки приложения: один Node.js-процесс поднимает Fastify API и React UI, открывает версионированную SQLite и предоставляет команду диагностики. Функции создания Мониторов и выполнения Проверок добавляются следующими GitHub Issues.
 
 - Доменный язык и подтверждённые ограничения: [`CONTEXT.md`](./CONTEXT.md)
 - Карта Wayfinder: [`.scratch/website-change-monitor-mvp/map.md`](./.scratch/website-change-monitor-mvp/map.md)
 - Исследовательские билеты: [`.scratch/website-change-monitor-mvp/issues/`](./.scratch/website-change-monitor-mvp/issues/)
+- PRD: [`.scratch/website-change-monitor-mvp/PRD.md`](./.scratch/website-change-monitor-mvp/PRD.md)
+- Реализационные билеты: [GitHub Issues](https://github.com/theEvgene/website-change-monitor/issues)
 
-Планируемый рабочий поток: `wayfinder -> to-spec -> to-tickets -> implement`.
+Рабочий поток: `wayfinder -> to-spec -> to-tickets -> implement`.
+
+## Запуск оболочки
+
+Требуется Windows 11 x64 и Node.js 24 LTS. Команды выполняются из корня репозитория обычным пользователем:
+
+```powershell
+npm ci
+npm run build
+npm run doctor
+npm start
+```
+
+`doctor` возвращает:
+
+- `0` — приложение готово;
+- `1` — ядро приложения нельзя безопасно запустить;
+- `2` — ядро готово, но необязательный Telegram недоступен или ещё не настроен.
+
+На текущем этапе нормальный результат — `2`: Telegram подключается отдельным билетом и не блокирует запуск. `npm start` слушает только `127.0.0.1:43117`, открывает интерфейс в браузере и остаётся foreground-процессом. Повторный запуск открывает уже работающий экземпляр; чужой процесс на порту приводит к явной ошибке.
+
+Изменяемые данные хранятся в `%LOCALAPPDATA%\WebsiteChangeMonitor`, а не в Git checkout. Обычная остановка выполняется через `Ctrl+C`.
+
+## Проверка разработки
+
+```powershell
+npm run typecheck
+npm test
+npm run build
+```
 
 ## Границы MVP
 
@@ -20,4 +51,3 @@
 - наблюдение за выбранными CSS-селекторами с исключениями;
 - журнал проверок, история изменений и двухколоночное сравнение;
 - уведомления в интерфейсе, браузере и через Telegram-модуль.
-

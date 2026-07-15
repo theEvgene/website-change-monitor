@@ -57,23 +57,24 @@ npm --version
 npm ci
 npm run install:browsers      # только Chromium, в app-local cache
 npm run build
+# Необязательно до первого запуска; можно настроить позднее
 npm run configure -- --telegram-executable 'C:\absolute\path\.venv\Scripts\telegram-alert.exe'
 npm run doctor
 npm start
 ```
 
-До `configure` пользователь один раз устанавливает и настраивает уже проверенный Telegram-модуль из его собственного репозитория:
+Для Telegram пользователь один раз устанавливает и настраивает уже проверенный модуль из его собственного репозитория; этот шаг можно выполнить до первого запуска основного приложения либо позднее:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 .\.venv\Scripts\telegram-alert.exe configure --device 'home-pc' --chat-id '<chat id>'
 ```
 
-`configure` основного приложения принимает только абсолютный существующий `.exe`, запускает безопасный `show-config`/self-check с `PYTHONUTF8=1`, не запрашивает bot token и транзакционно записывает путь в единую SQLite-БД. При неготовом обязательном Telegram-адаптере `doctor` и первый production start должны остановиться с конкретной инструкцией, а не молча отключать канал.
+`configure` основного приложения принимает только абсолютный существующий `.exe`, запускает безопасный `show-config`/self-check с `PYTHONUTF8=1`, не запрашивает bot token и транзакционно записывает путь в единую SQLite-БД. Если Telegram не настроен или недоступен, `doctor` явно сообщает ошибку этого компонента, но production start продолжает работу в деградированном режиме: UI показывает постоянную плашку «Telegram недоступен», а Проверки, центр и браузерные уведомления работают дальше.
 
 Первый `npm start` выполняет последовательность до открытия UI:
 
-1. проверяет Windows 11 x64, Node 24, доступность каталогов, native addon, Chromium и Telegram executable;
+1. проверяет Windows 11 x64, Node 24, доступность каталогов, native addon и Chromium как обязательные компоненты, а Telegram executable — как необязательный внешний канал;
 2. проверяет, не отвечает ли уже собственный health endpoint;
 3. создаёт каталоги и session log;
 4. открывает SQLite, проверяет фактические `journal_mode=WAL`, `foreign_keys=ON`, `synchronous=FULL`, `busy_timeout` и минимальную версию SQLite;
@@ -101,7 +102,7 @@ PowerShell `Start-Process` умеет открывать файл/URL зарег
 
 Практичный предел MVP: roll session log при 10 MiB и сохранять 20 последних файлов; cleanup выполняется только после успешного открытия нового log. Путь к текущему log всегда печатается при старте и показывается на странице диагностики.
 
-`npm run doctor` — read-only команда, которую рекомендуют запускать при остановленном приложении. Она печатает и возвращает ненулевой exit code по пунктам:
+`npm run doctor` — read-only команда, которую рекомендуют запускать при остановленном приложении. Она печатает результат по пунктам и различает фатальную ошибку от деградированного Telegram: exit `0` — всё готово, `1` — обязательный компонент не готов, `2` — приложение готово без Telegram. `npm start` и `doctor --preflight` для обновления допускают `0/2`, но не `1`:
 
 - ОС/архитектура, Node 24 и npm;
 - согласованность `package.json`/lockfile и загрузка `better-sqlite3`;
@@ -146,7 +147,7 @@ Manual backups приложение автоматически не удаляе
 
 ## Итоговый минимальный пользовательский поток
 
-1. Один раз установить Node 24 LTS x64, Telegram sender, затем выполнить `npm ci`, `npm run install:browsers`, `npm run build`, `configure`, `doctor`.
+1. Один раз установить Node 24 LTS x64, затем выполнить `npm ci`, `npm run install:browsers`, `npm run build` и `doctor`; Telegram sender и `configure` можно подготовить сразу либо позднее по инструкции из UI.
 2. Каждый раз запускать ярлык или `npm start`; UI открывается на `http://127.0.0.1:43117/`. Повторный запуск только открывает ещё одну вкладку существующего экземпляра.
 3. Останавливать `Ctrl+C` и ждать подтверждения; не рассчитывать на закрытие окна как на гарантированно graceful операцию.
 4. Искать данные, backups и логи только в `%LOCALAPPDATA%\WebsiteChangeMonitor`; кодовый каталог можно перемещать, обновлять и пересобирать независимо.

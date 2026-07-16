@@ -34,7 +34,7 @@ describe("public HTTP contract", () => {
     ]);
     expect(document.paths["/api/health"]?.get?.operationId).toBe("getHealth");
     expect(document.paths["/api/preview"]?.post?.operationId).toBe(
-      "previewTarget",
+      "previewObservationScope",
     );
     expect(document.paths["/api/version"]?.get?.operationId).toBe("getVersion");
     expect(Object.keys(document.components.schemas).sort()).toEqual([
@@ -44,6 +44,30 @@ describe("public HTTP contract", () => {
       "PreviewResponseV1",
       "VersionResponseV1",
     ]);
+    expect(document.components.schemas.PreviewRequestV1).toMatchObject({
+      required: ["url", "targetSelectors", "exclusionSelectors"],
+      properties: {
+        targetSelectors: {
+          type: "array",
+          minItems: 1,
+          description: expect.stringContaining("каждый селектор обязан найти"),
+        },
+        exclusionSelectors: {
+          type: "array",
+          description: expect.stringContaining("порядок селекторов не влияет"),
+        },
+      },
+    });
+    expect(document.components.schemas.PreviewResponseV1).toMatchObject({
+      properties: {
+        targetCount: {
+          description: expect.stringContaining("уникальном объединении"),
+        },
+        targets: {
+          description: expect.stringContaining("глобальном порядке DOM"),
+        },
+      },
+    });
 
     for (const [path, pathItem] of Object.entries(document.paths)) {
       for (const method of Object.keys(pathItem)) {

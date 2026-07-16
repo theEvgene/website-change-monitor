@@ -6,7 +6,10 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createHttpTestContext } from "./support/http-test-context.js";
-import { successfulPageProbeResult } from "./support/page-probe.js";
+import {
+  simplePagePreviewTargets,
+  successfulPageProbeResult,
+} from "./support/page-probe.js";
 
 const executeFile = promisify(execFile);
 
@@ -24,7 +27,14 @@ describe("documented direct HTTP examples", () => {
       port,
       pageProbe: {
         async preview() {
-          return successfulPageProbeResult("https://example.com/catalog", 3);
+          return successfulPageProbeResult(
+            "https://example.com/catalog",
+            [
+              { selector: ".page-title", matchCount: 1 },
+              { selector: ".product-card", matchCount: 2 },
+            ],
+            simplePagePreviewTargets("Catalog", "Product A", "Product B"),
+          );
         },
       },
     });
@@ -54,8 +64,13 @@ describe("documented direct HTTP examples", () => {
     });
     expect(JSON.parse(previewResult)).toEqual({
       finalUrl: "https://example.com/catalog",
-      targetSelector: ".product-card",
-      matchCount: 3,
+      targetMatches: [
+        { selector: ".page-title", matchCount: 1 },
+        { selector: ".product-card", matchCount: 2 },
+      ],
+      exclusionSelectors: [".price"],
+      targetCount: 3,
+      targets: simplePagePreviewTargets("Catalog", "Product A", "Product B"),
     });
   });
 });

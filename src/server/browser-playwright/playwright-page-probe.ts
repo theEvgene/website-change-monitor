@@ -158,6 +158,7 @@ async function runPreview(
       timezoneId: "Europe/Moscow",
       viewport: { width: 1440, height: 900 },
     });
+    await disableWebRtc(context);
     context.setDefaultNavigationTimeout(timings.navigationMs);
     context.setDefaultTimeout(timings.targetMs);
     page = await context.newPage();
@@ -282,6 +283,21 @@ async function runPreview(
     await context?.close().catch(() => undefined);
     await proxy.close();
   }
+}
+
+async function disableWebRtc(context: BrowserContext): Promise<void> {
+  await context.addInitScript(() => {
+    for (const name of ["RTCPeerConnection", "webkitRTCPeerConnection"]) {
+      if (name in globalThis) {
+        Object.defineProperty(globalThis, name, {
+          configurable: false,
+          enumerable: false,
+          value: undefined,
+          writable: false,
+        });
+      }
+    }
+  });
 }
 
 async function validateNativeSelector(page: Page, selector: string) {

@@ -1,3 +1,4 @@
+import { createSocket } from "node:dgram";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 
@@ -64,6 +65,24 @@ describe("Playwright PageProbe", () => {
         response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
         response.end(`<div class="target">ready</div><script>
           setTimeout(() => fetch('http://127.0.0.1:${address.port}/private'), 10);
+        </script>`);
+        return;
+      }
+      if (request.url?.startsWith("/webrtc")) {
+        const port = new URL(request.url, "http://fixture.test").searchParams.get(
+          "port",
+        );
+        response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        response.end(`<div class="target">ready</div><script>
+          try {
+            const peer = new RTCPeerConnection({
+              iceServers: [{ urls: 'stun:127.0.0.1:${port}' }],
+            });
+            peer.createDataChannel('probe');
+            peer.createOffer()
+              .then((offer) => peer.setLocalDescription(offer))
+              .catch(() => undefined);
+          } catch {}
         </script>`);
         return;
       }
@@ -175,6 +194,35 @@ describe("Playwright PageProbe", () => {
       httpStatus: 200,
       timings: { totalMs: expect.any(Number) },
     });
+  });
+
+  it("disables WebRTC so pages cannot bypass the safe proxy", async () => {
+    const udp = createSocket("udp4");
+    const packets: Buffer[] = [];
+    udp.on("message", (packet) => packets.push(packet));
+    await new Promise<void>((resolve, reject) => {
+      udp.once("error", reject);
+      udp.bind(0, "127.0.0.1", resolve);
+    });
+
+    try {
+      const address = udp.address();
+      const probe = createPlaywrightPageProbe(browser, {
+        networkAccess: fixtureNetworkAccess(),
+        timings: fastTimings(),
+      });
+
+      await expect(
+        probe.preview({
+          url: `${fixtureUrl}/webrtc?port=${address.port}`,
+          targetSelector: ".target",
+        }),
+      ).resolves.toMatchObject({ ok: true });
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      expect(packets).toHaveLength(0);
+    } finally {
+      await new Promise<void>((resolve) => udp.close(() => resolve()));
+    }
   });
 
   it("uses a fresh non-persistent BrowserContext for every preview", async () => {

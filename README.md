@@ -11,6 +11,7 @@
 - Исследовательские билеты: [`.scratch/website-change-monitor-mvp/issues/`](./.scratch/website-change-monitor-mvp/issues/)
 - PRD: [`.scratch/website-change-monitor-mvp/PRD.md`](./.scratch/website-change-monitor-mvp/PRD.md)
 - Реализационные билеты: [GitHub Issues](https://github.com/theEvgene/website-change-monitor/issues)
+- Локальный HTTP API: [`docs/http-api.md`](./docs/http-api.md)
 
 Рабочий поток: `wayfinder -> to-spec -> to-tickets -> implement`.
 

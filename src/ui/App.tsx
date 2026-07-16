@@ -14,9 +14,15 @@ interface HealthResponse {
   };
 }
 
+interface VersionResponse {
+  application: "website-change-monitor";
+  apiVersion: "v1";
+  version: string;
+}
+
 type HealthState =
   | { kind: "loading" }
-  | { kind: "loaded"; health: HealthResponse }
+  | { kind: "loaded"; health: HealthResponse; version: VersionResponse }
   | { kind: "failed" };
 
 export function App() {
@@ -25,17 +31,28 @@ export function App() {
   useEffect(() => {
     const controller = new AbortController();
 
-    void fetch("/api/health", {
+    const requestOptions = {
       headers: { accept: "application/json" },
       signal: controller.signal,
-    })
-      .then(async (response) => {
+    };
+
+    void Promise.all([
+      fetch("/api/health", requestOptions).then(async (response) => {
         if (!response.ok) {
           throw new Error(`Health request failed: ${response.status}`);
         }
         return (await response.json()) as HealthResponse;
-      })
-      .then((health) => setState({ kind: "loaded", health }))
+      }),
+      fetch("/api/version", requestOptions).then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`Version request failed: ${response.status}`);
+        }
+        return (await response.json()) as VersionResponse;
+      }),
+    ])
+      .then(([health, version]) =>
+        setState({ kind: "loaded", health, version }),
+      )
       .catch((error: unknown) => {
         if (error instanceof DOMException && error.name === "AbortError") {
           return;
@@ -54,7 +71,7 @@ export function App() {
           <h1>Website Change Monitor</h1>
         </div>
         {state.kind === "loaded" ? (
-          <span className="version">Версия {state.health.version}</span>
+          <span className="version">Версия {state.version.version}</span>
         ) : null}
       </header>
 

@@ -1,8 +1,12 @@
 ## Agent skills
 
+### Создание и изменение скиллов
+
+Если реализационный билет требует создать или изменить Codex-скилл, обязательно использовать `writing-great-skills` как руководство перед внесением изменений.
+
 ### Issue tracker
 
-Задачи хранятся локально в Markdown-файлах; внешние PR не являются источником задач. См. `docs/agents/issue-tracker.md`.
+Исследовательские задачи и PRD хранятся локально в Markdown-файлах. Реализационные билеты Website Change Monitor MVP после `/to-tickets` ведутся в GitHub Issues; внешние PR не являются источником задач. См. `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

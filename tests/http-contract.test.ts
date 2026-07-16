@@ -29,23 +29,35 @@ describe("public HTTP contract", () => {
     expect(document.info.version).toBe("0.1.0");
     expect(Object.keys(document.paths).sort()).toEqual([
       "/api/health",
+      "/api/preview",
       "/api/version",
     ]);
     expect(document.paths["/api/health"]?.get?.operationId).toBe("getHealth");
+    expect(document.paths["/api/preview"]?.post?.operationId).toBe(
+      "previewTarget",
+    );
     expect(document.paths["/api/version"]?.get?.operationId).toBe("getVersion");
     expect(Object.keys(document.components.schemas).sort()).toEqual([
       "ApiErrorV1",
       "HealthResponseV1",
+      "PreviewRequestV1",
+      "PreviewResponseV1",
       "VersionResponseV1",
     ]);
 
-    for (const path of Object.keys(document.paths)) {
-      const actual = await server.inject({
-        method: "GET",
-        url: path,
-        headers: localHeaders(),
-      });
-      expect(actual.statusCode, `${path} must be an actual route`).not.toBe(404);
+    for (const [path, pathItem] of Object.entries(document.paths)) {
+      for (const method of Object.keys(pathItem)) {
+        const actual = await server.inject({
+          method: method.toUpperCase() as "GET" | "POST",
+          url: path,
+          headers: localHeaders(),
+          ...(method === "post" ? { payload: {} } : {}),
+        });
+        expect(
+          actual.statusCode,
+          `${method.toUpperCase()} ${path} must be an actual route`,
+        ).not.toBe(404);
+      }
     }
   });
 

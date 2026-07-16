@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createHttpTestContext } from "./support/http-test-context.js";
+import { successfulPageProbeResult } from "./support/page-probe.js";
 
 const executeFile = promisify(execFile);
 
@@ -19,7 +20,14 @@ describe("documented direct HTTP examples", () => {
   it("executes the PowerShell and curl commands published in the guide", async () => {
     const guide = await readFile("docs/http-api.md", "utf8");
     const port = await availablePort();
-    const server = await context.applicationServer(port);
+    const server = await context.applicationServer({
+      port,
+      pageProbe: {
+        async preview() {
+          return successfulPageProbeResult("https://example.com/catalog", 3);
+        },
+      },
+    });
     await server.listen({ host: "127.0.0.1", port });
 
     const powershellResult = await runDocumentedExample(
@@ -28,6 +36,10 @@ describe("documented direct HTTP examples", () => {
     );
     const curlResult = await runDocumentedExample(
       example(guide, "curl-version"),
+      port,
+    );
+    const previewResult = await runDocumentedExample(
+      example(guide, "powershell-preview"),
       port,
     );
 
@@ -40,8 +52,12 @@ describe("documented direct HTTP examples", () => {
       apiVersion: "v1",
       version: "0.1.0",
     });
+    expect(JSON.parse(previewResult)).toEqual({
+      finalUrl: "https://example.com/catalog",
+      targetSelector: ".product-card",
+      matchCount: 3,
+    });
   });
-
 });
 
 function example(guide: string, name: string): string {

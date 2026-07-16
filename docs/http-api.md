@@ -18,6 +18,26 @@ Invoke-RestMethod -Uri 'http://127.0.0.1:43117/api/health' | ConvertTo-Json -Com
 curl.exe --fail --silent --show-error http://127.0.0.1:43117/api/version
 ```
 
+Предпросмотреть один Целевой селектор через тот же API:
+
+<!-- verify:powershell-preview -->
+```powershell
+$body = @{ url = 'https://example.com/catalog'; targetSelector = '.product-card' } | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:43117/api/preview' -ContentType 'application/json' -Body $body | ConvertTo-Json -Compress -Depth 8
+```
+
+Успешный preview возвращает фактически открытый URL после разрешённых redirect, исходный Целевой селектор и число совпавших элементов:
+
+```json
+{
+  "finalUrl": "https://example.com/catalog",
+  "targetSelector": ".product-card",
+  "matchCount": 3
+}
+```
+
+Разрешены только публичные абсолютные HTTP(S) URL без встроенных учётных данных и стандартные CSS-селекторы light DOM главного документа. XPath, Playwright-specific selectors, iframe и shadow DOM не поддерживаются. Каждый запрос и redirect проходит проверку адреса; loopback, private, link-local, multicast и служебные диапазоны блокируются.
+
 Сохранить OpenAPI-документ для инструмента или агента:
 
 ```powershell
@@ -47,7 +67,7 @@ Invoke-WebRequest -Uri 'http://127.0.0.1:43117/openapi.json' -OutFile 'openapi.j
 }
 ```
 
-`code` предназначен для программной обработки, `message` — для пользователя. Ответ никогда не содержит stack trace, секреты или внутренние подробности исключения. Базовые коды: `invalid_origin` (403), `not_found` (404), `invalid_host` (421) и `internal_error` (500).
+`code` предназначен для программной обработки, `message` — для пользователя. Ответ никогда не содержит stack trace, секреты или внутренние подробности исключения. Базовые коды: `invalid_request`/`invalid_origin` (400/403), `not_found` (404), `invalid_host` (421) и `internal_error` (500). Preview дополнительно возвращает стабильные коды валидации, сетевой политики, навигации, поиска цели и Chromium, перечисленные в схеме `ApiErrorV1` OpenAPI-документа.
 
 ## Ограничение локального доступа
 

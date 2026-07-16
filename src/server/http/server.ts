@@ -2,6 +2,8 @@ import fastifyStatic from "@fastify/static";
 import fastifySwagger from "@fastify/swagger";
 import Fastify, { type FastifyInstance } from "fastify";
 
+import { PageProbeError, type PageProbe } from "../application/page-probe.js";
+import { previewPage, PreviewInputError } from "../application/preview-page.js";
 import type { ApplicationDatabase } from "../persistence/database.js";
 import {
   apiError,
@@ -10,6 +12,9 @@ import {
   applicationId,
   healthResponseSchemaV1,
   healthRouteSchema,
+  previewRequestSchemaV1,
+  previewResponseSchemaV1,
+  previewRouteSchema,
   versionResponseSchemaV1,
   versionRouteSchema,
 } from "./contract.js";
@@ -18,6 +23,7 @@ export interface BuildHttpServerOptions {
   database: ApplicationDatabase;
   version: string;
   port: number;
+  pageProbe?: PageProbe;
   staticRoot?: string;
 }
 
@@ -63,7 +69,18 @@ export function buildHttpServer(
       .send(apiError("not_found", "Запрошенная операция не найдена."));
   });
 
-  server.setErrorHandler(async (_error, _request, reply) => {
+  server.setErrorHandler(async (error, _request, reply) => {
+    if (isBadRequestError(error)) {
+      await reply
+        .code(400)
+        .send(
+          apiError(
+            "invalid_request",
+            "Тело запроса не соответствует HTTP-контракту.",
+          ),
+        );
+      return;
+    }
     await reply
       .code(500)
       .send(apiError("internal_error", "Внутренняя ошибка приложения."));
@@ -91,6 +108,8 @@ export function buildHttpServer(
     apiServer.addSchema(apiErrorSchemaV1);
     apiServer.addSchema(healthResponseSchemaV1);
     apiServer.addSchema(versionResponseSchemaV1);
+    apiServer.addSchema(previewRequestSchemaV1);
+    apiServer.addSchema(previewResponseSchemaV1);
 
     apiServer.get("/api/health", { schema: healthRouteSchema }, async () => {
       const database = options.database.diagnostics();
@@ -115,6 +134,29 @@ export function buildHttpServer(
       version: options.version,
     }));
 
+    apiServer.post<{ Body: { url: string; targetSelector: string } }>(
+      "/api/preview",
+      { schema: previewRouteSchema },
+      async (request, reply) => {
+        try {
+          return await previewPage(
+            request.body,
+            options.pageProbe ?? unavailablePageProbe,
+          );
+        } catch (error: unknown) {
+          if (error instanceof PreviewInputError) {
+            return reply.code(400).send(apiError(error.code, error.message));
+          }
+          if (error instanceof PageProbeError) {
+            return reply
+              .code(pageProbeStatus(error.code))
+              .send(apiError(error.code, error.message));
+          }
+          throw error;
+        }
+      },
+    );
+
     apiServer.get(
       "/openapi.json",
       { schema: { hide: true } },
@@ -130,4 +172,50 @@ export function buildHttpServer(
   }
 
   return server;
+}
+
+const unavailablePageProbe: PageProbe = {
+  async preview() {
+    return {
+      ok: false,
+      code: "browser_failed",
+      message: "Chromium недоступен для исследования страницы.",
+      stage: "setup",
+      timings: {
+        totalMs: 0,
+        navigationMs: 0,
+        targetMs: 0,
+        scrollMs: 0,
+        stabilityMs: 0,
+        extractionMs: 0,
+      },
+    };
+  },
+};
+
+function pageProbeStatus(code: PageProbeError["code"]): 400 | 422 | 502 | 504 {
+  if (code === "invalid_url" || code === "invalid_selector") {
+    return 400;
+  }
+  if (code === "check_deadline_exceeded" || code === "navigation_timeout") {
+    return 504;
+  }
+  if (
+    code === "target_not_found" ||
+    code === "target_not_visible" ||
+    code === "target_disappeared" ||
+    code === "content_unstable"
+  ) {
+    return 422;
+  }
+  return 502;
+}
+
+function isBadRequestError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (("validation" in error && error.validation !== undefined) ||
+      ("statusCode" in error && error.statusCode === 400))
+  );
 }

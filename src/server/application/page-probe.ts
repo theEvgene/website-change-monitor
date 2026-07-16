@@ -1,0 +1,92 @@
+export const pageProbeErrorCodes = [
+  "address_blocked",
+  "application_shutdown",
+  "browser_failed",
+  "check_deadline_exceeded",
+  "content_unstable",
+  "extraction_failed",
+  "http_error",
+  "invalid_selector",
+  "invalid_url",
+  "navigation_failed",
+  "navigation_timeout",
+  "scroll_failed",
+  "target_disappeared",
+  "target_not_found",
+  "target_not_visible",
+  "unsupported_content",
+] as const;
+
+export type PageProbeErrorCode = (typeof pageProbeErrorCodes)[number];
+
+export interface PagePreviewInput {
+  url: string;
+  targetSelector: string;
+}
+
+export type PageProbeStage =
+  | "setup"
+  | "validation"
+  | "navigation"
+  | "target"
+  | "scroll"
+  | "stability"
+  | "extraction";
+
+export interface PageProbeObservedTimings {
+  totalMs: number;
+  navigationMs: number;
+  targetMs: number;
+  scrollMs: number;
+  stabilityMs: number;
+  extractionMs: number;
+}
+
+export interface PageProbeDiagnostics {
+  stage: PageProbeStage;
+  finalUrl?: string | undefined;
+  httpStatus?: number | undefined;
+  timings: PageProbeObservedTimings;
+}
+
+export interface PagePreview {
+  finalUrl: string;
+  httpStatus: number;
+  matchCount: number;
+  timings: PageProbeObservedTimings;
+}
+
+export interface PageProbeSuccess {
+  ok: true;
+  preview: PagePreview;
+}
+
+export interface PageProbeFailure extends PageProbeDiagnostics {
+  ok: false;
+  code: PageProbeErrorCode;
+  message: string;
+}
+
+export type PageProbeResult = PageProbeSuccess | PageProbeFailure;
+
+export interface PageProbe {
+  preview(input: PagePreviewInput): Promise<PageProbeResult>;
+}
+
+export class PageProbeError extends Error {
+  readonly code: PageProbeErrorCode;
+  readonly stage: PageProbeStage;
+  readonly finalUrl?: string | undefined;
+  readonly httpStatus?: number | undefined;
+  readonly timings: PageProbeObservedTimings;
+
+  constructor(failure: PageProbeFailure) {
+    super(failure.message);
+    this.name = "PageProbeError";
+    this.code = failure.code;
+    this.stage = failure.stage;
+    this.finalUrl = failure.finalUrl;
+    this.httpStatus = failure.httpStatus;
+    this.timings = failure.timings;
+  }
+}

@@ -202,6 +202,47 @@ describe("observation scope preview API", () => {
     });
   });
 
+  it("returns a stable 422 when the Target area exceeds its resource budget", async () => {
+    const preview = vi.fn<PageProbe["preview"]>().mockResolvedValue({
+      ok: false,
+      code: "target_area_too_large",
+      message:
+        "Целевая область слишком велика. Сузьте Целевые селекторы или добавьте Селекторы исключения.",
+      stage: "extraction",
+      finalUrl: "https://example.com",
+      httpStatus: 200,
+      timings: {
+        totalMs: 10,
+        navigationMs: 4,
+        targetMs: 2,
+        scrollMs: 1,
+        stabilityMs: 2,
+        extractionMs: 1,
+      },
+    });
+    const server = await context.applicationServer({ pageProbe: { preview } });
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/preview",
+      headers: { host: "127.0.0.1:43117" },
+      payload: {
+        url: "https://example.com",
+        targetSelectors: [".card"],
+        exclusionSelectors: [],
+      },
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.json()).toEqual({
+      error: {
+        code: "target_area_too_large",
+        message:
+          "Целевая область слишком велика. Сузьте Целевые селекторы или добавьте Селекторы исключения.",
+      },
+    });
+  });
+
   it("returns a typed request error for a malformed JSON shape", async () => {
     const server = await context.applicationServer();
 

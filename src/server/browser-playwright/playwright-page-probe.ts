@@ -35,9 +35,16 @@ export interface PageProbeTimings {
   extractionMs: number;
 }
 
+export interface PageProbeResourceLimits {
+  maxTargets: number;
+  maxElementRecords: number;
+  maxVisibleTextCharacters: number;
+}
+
 export interface PlaywrightPageProbeOptions {
   networkAccess: NetworkAccess;
   timings?: Partial<PageProbeTimings>;
+  limits?: Partial<PageProbeResourceLimits>;
 }
 
 export interface PageProbeRuntime {
@@ -56,11 +63,18 @@ const productionTimings: PageProbeTimings = {
   extractionMs: 5_000,
 };
 
+const productionResourceLimits: PageProbeResourceLimits = {
+  maxTargets: 500,
+  maxElementRecords: 20_000,
+  maxVisibleTextCharacters: 1_000_000,
+};
+
 export function createPlaywrightPageProbe(
   browser: Browser,
   options: PlaywrightPageProbeOptions,
 ): PageProbe {
   const timings = { ...productionTimings, ...options.timings };
+  const limits = { ...productionResourceLimits, ...options.limits };
 
   return {
     async preview(input) {
@@ -72,6 +86,7 @@ export function createPlaywrightPageProbe(
             browser,
             options.networkAccess,
             timings,
+            limits,
             input,
           ),
         };
@@ -118,6 +133,7 @@ async function runPreview(
   browser: Browser,
   networkAccess: NetworkAccess,
   timings: PageProbeTimings,
+  limits: PageProbeResourceLimits,
   input: PagePreviewInput,
 ) {
   let context: BrowserContext | undefined;
@@ -247,7 +263,7 @@ async function runPreview(
     });
     stage = "extraction";
     const extracted = await timed("extractionMs", () =>
-      extractObservationScope(page!, input, timings.extractionMs),
+      extractObservationScope(page!, input, timings.extractionMs, limits),
     );
     if (blockedError instanceof PageProbeAbort) {
       throw blockedError;
@@ -562,10 +578,11 @@ async function extractObservationScope(
   page: Page,
   input: PagePreviewInput,
   timeout: number,
+  limits: PageProbeResourceLimits,
 ) {
   try {
     const extracted = await Promise.race([
-      page.evaluate(({ targetSelectors, exclusionSelectors }) => {
+      page.evaluate(({ targetSelectors, exclusionSelectors, limits }) => {
         const targetMatches = targetSelectors.map((selector) => ({
           selector,
           matchCount: document.querySelectorAll(selector).length,
@@ -586,10 +603,33 @@ async function extractObservationScope(
             : -1;
         });
 
+        if (targets.length > limits.maxTargets) {
+          return { status: "too_large" as const, reason: "targets" as const };
+        }
+
+        let elementRecordCount = 0;
+        let visibleTextCharacterCount = 0;
+        const extractedTargets: Array<{
+          elements: Array<{
+            namespace: string | null;
+            name: string;
+            childElementCount: number;
+          }>;
+          visibleText: string;
+        }> = [];
+        for (const target of targets) {
+          const targetResult = extractTarget(target);
+          if (typeof targetResult === "string") {
+            return { status: "too_large" as const, reason: targetResult };
+          }
+          extractedTargets.push(targetResult);
+        }
+
         return {
+          status: "ok" as const,
           targetMatches,
           targetCount: targets.length,
-          targets: targets.map((target) => extractTarget(target)),
+          targets: extractedTargets,
         };
 
         function extractTarget(target: Element) {
@@ -614,12 +654,20 @@ async function extractObservationScope(
               box.height > 0;
             const visibleText =
               rendered && target instanceof HTMLElement ? target.innerText : "";
+            visibleTextCharacterCount += visibleText.length;
+            if (
+              visibleTextCharacterCount > limits.maxVisibleTextCharacters
+            ) {
+              return "visible_text" as const;
+            }
             const elements: Array<{
               namespace: string | null;
               name: string;
               childElementCount: number;
             }> = [];
-            visitElement(target, target, excluded, elements);
+            if (!visitElement(target, target, excluded, elements)) {
+              return "elements" as const;
+            }
             return { elements, visibleText };
           } finally {
             for (const { element, value, priority } of displays) {
@@ -658,9 +706,13 @@ async function extractObservationScope(
             name: string;
             childElementCount: number;
           }>,
-        ) {
+        ): boolean {
           if (element !== root && excluded.has(element)) {
-            return;
+            return true;
+          }
+          elementRecordCount += 1;
+          if (elementRecordCount > limits.maxElementRecords) {
+            return false;
           }
           const children = [...element.children].filter(
             (child) => !excluded.has(child),
@@ -671,12 +723,21 @@ async function extractObservationScope(
             childElementCount: children.length,
           });
           for (const child of children) {
-            visitElement(child, root, excluded, result);
+            if (!visitElement(child, root, excluded, result)) {
+              return false;
+            }
           }
+          return true;
         }
-      }, input),
+      }, { ...input, limits }),
       rejectAfter(timeout),
     ]);
+    if (extracted.status === "too_large") {
+      throw pageError(
+        "target_area_too_large",
+        "Целевая область слишком велика. Сузьте Целевые селекторы или добавьте Селекторы исключения.",
+      );
+    }
     if (extracted.targetCount === 0) {
       throw pageError(
         "target_disappeared",

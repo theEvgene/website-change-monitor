@@ -46,6 +46,15 @@ describe("Playwright PageProbe", () => {
           </main>`);
         return;
       }
+      if (request.url === "/budget") {
+        response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        response.end(`<!doctype html>
+          <main>
+            <div class="target">AAAA<span class="target">nested</span></div>
+            <article class="target">BBBB</article>
+          </main>`);
+        return;
+      }
       if (request.url === "/disappearing") {
         response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
         response.end(`<div class="target">Временная цель</div><script>
@@ -345,6 +354,93 @@ describe("Playwright PageProbe", () => {
           { visibleText: "Товар A" },
           { visibleText: expect.stringContaining("Товар B") },
           { visibleText: "Товар B" },
+        ],
+      },
+    });
+  });
+
+  it.each([
+    [
+      "target count",
+      {
+        maxTargets: 2,
+        maxElementRecords: 4,
+        maxVisibleTextCharacters: 20,
+      },
+    ],
+    [
+      "element records",
+      {
+        maxTargets: 3,
+        maxElementRecords: 3,
+        maxVisibleTextCharacters: 20,
+      },
+    ],
+    [
+      "visible text",
+      {
+        maxTargets: 3,
+        maxElementRecords: 4,
+        maxVisibleTextCharacters: 19,
+      },
+    ],
+  ])("rejects a Target area over the %s budget", async (_name, limits) => {
+    const probe = createPlaywrightPageProbe(browser, {
+      networkAccess: fixtureNetworkAccess(),
+      timings: fastTimings(),
+      limits,
+    });
+
+    await expect(
+      probe.preview({
+        url: `${fixtureUrl}/budget`,
+        targetSelectors: [".target"],
+        exclusionSelectors: [],
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      code: "target_area_too_large",
+      stage: "extraction",
+    });
+    expect(browser.contexts()).toHaveLength(0);
+
+    await expect(
+      probe.preview({
+        url: `${fixtureUrl}/budget`,
+        targetSelectors: ["article"],
+        exclusionSelectors: [],
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      preview: { targetCount: 1 },
+    });
+  });
+
+  it("accepts a Target area exactly at every extraction budget", async () => {
+    const probe = createPlaywrightPageProbe(browser, {
+      networkAccess: fixtureNetworkAccess(),
+      timings: fastTimings(),
+      limits: {
+        maxTargets: 3,
+        maxElementRecords: 4,
+        maxVisibleTextCharacters: 20,
+      },
+    });
+
+    await expect(
+      probe.preview({
+        url: `${fixtureUrl}/budget`,
+        targetSelectors: [".target"],
+        exclusionSelectors: [],
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      preview: {
+        targetCount: 3,
+        targets: [
+          { visibleText: "AAAAnested" },
+          { visibleText: "nested" },
+          { visibleText: "BBBB" },
         ],
       },
     });

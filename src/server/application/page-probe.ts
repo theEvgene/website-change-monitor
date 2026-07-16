@@ -11,6 +11,7 @@ export const pageProbeErrorCodes = [
   "navigation_failed",
   "navigation_timeout",
   "scroll_failed",
+  "target_area_too_large",
   "target_disappeared",
   "target_not_found",
   "target_not_visible",

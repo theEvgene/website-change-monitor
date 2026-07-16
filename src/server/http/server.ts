@@ -219,6 +219,7 @@ function pageProbeStatus(code: PageProbeError["code"]): 400 | 422 | 502 | 504 {
   if (
     code === "target_not_found" ||
     code === "target_not_visible" ||
+    code === "target_area_too_large" ||
     code === "target_disappeared" ||
     code === "content_unstable"
   ) {

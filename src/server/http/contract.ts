@@ -1,5 +1,7 @@
 import type { FastifySchema } from "fastify";
 
+import { pageProbeErrorCodes } from "../application/page-probe.js";
+
 export const applicationId = "website-change-monitor";
 export const apiVersion = "v1";
 
@@ -7,7 +9,10 @@ export const apiErrorCodesV1 = [
   "internal_error",
   "invalid_host",
   "invalid_origin",
+  "invalid_request",
   "not_found",
+  ...pageProbeErrorCodes,
+  "unsupported_selector",
 ] as const;
 export type ApiErrorCodeV1 = (typeof apiErrorCodesV1)[number];
 
@@ -82,6 +87,29 @@ export const versionResponseSchemaV1 = {
   },
 } as const;
 
+export const previewRequestSchemaV1 = {
+  $id: "PreviewRequestV1",
+  type: "object",
+  additionalProperties: false,
+  required: ["url", "targetSelector"],
+  properties: {
+    url: { type: "string", minLength: 1 },
+    targetSelector: { type: "string", minLength: 1 },
+  },
+} as const;
+
+export const previewResponseSchemaV1 = {
+  $id: "PreviewResponseV1",
+  type: "object",
+  additionalProperties: false,
+  required: ["finalUrl", "targetSelector", "matchCount"],
+  properties: {
+    finalUrl: { type: "string" },
+    targetSelector: { type: "string" },
+    matchCount: { type: "integer", minimum: 1 },
+  },
+} as const;
+
 const commonErrors = {
   403: { $ref: "ApiErrorV1#" },
   421: { $ref: "ApiErrorV1#" },
@@ -102,6 +130,20 @@ export const versionRouteSchema: FastifySchema = {
   summary: "Получить версии приложения и HTTP API",
   response: {
     200: { $ref: "VersionResponseV1#" },
+    ...commonErrors,
+  },
+};
+
+export const previewRouteSchema: FastifySchema = {
+  operationId: "previewTarget",
+  summary: "Предпросмотреть один Целевой селектор",
+  body: { $ref: "PreviewRequestV1#" },
+  response: {
+    200: { $ref: "PreviewResponseV1#" },
+    400: { $ref: "ApiErrorV1#" },
+    422: { $ref: "ApiErrorV1#" },
+    502: { $ref: "ApiErrorV1#" },
+    504: { $ref: "ApiErrorV1#" },
     ...commonErrors,
   },
 };

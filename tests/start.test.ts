@@ -4,10 +4,11 @@ import { createServer as createTcpServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { buildHttpServer } from "../src/server/http/server.js";
 import { startApplication } from "../src/server/operations/start.js";
+import { successfulPageProbeResult } from "./support/page-probe.js";
 import { PortInUseError } from "../src/server/operations/start.js";
 import { openApplicationDatabase } from "../src/server/persistence/database.js";
 
@@ -51,11 +52,61 @@ describe("application start", () => {
     }
   });
 
+  it("serves preview through one application PageProbe and closes it", async () => {
+    const { root, staticRoot } = await applicationFixture();
+    const port = await freePort();
+    const preview = vi
+      .fn()
+      .mockResolvedValue(
+        successfulPageProbeResult("https://example.com/final", 2),
+      );
+    const closePageProbe = vi.fn().mockResolvedValue(undefined);
+    let outcome: Awaited<ReturnType<typeof startApplication>> | undefined;
+
+    try {
+      outcome = await startApplication({
+        rootDirectory: root,
+        staticRoot,
+        port,
+        version: "0.1.0",
+        openBrowser: async () => undefined,
+        startPageProbe: async () => ({
+          pageProbe: { preview },
+          close: closePageProbe,
+        }),
+      });
+
+      const response = await fetch(`http://127.0.0.1:${port}/api/preview`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          url: "https://example.com/start",
+          targetSelector: ".target",
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({ matchCount: 2 });
+      expect(preview).toHaveBeenCalledOnce();
+    } finally {
+      if (outcome?.kind === "started") {
+        await outcome.close();
+      }
+      expect(closePageProbe).toHaveBeenCalledOnce();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("opens the UI of an existing Website Change Monitor instance", async () => {
     const { root, staticRoot } = await applicationFixture();
     const port = await freePort();
     const database = openApplicationDatabase({ rootDirectory: root });
-    const server = buildHttpServer({ database, version: "0.1.0", port, staticRoot });
+    const server = buildHttpServer({
+      database,
+      version: "0.1.0",
+      port,
+      staticRoot,
+    });
     const openedUrls: string[] = [];
 
     try {
@@ -153,7 +204,7 @@ async function applicationFixture() {
   const root = await mkdtemp(join(tmpdir(), "website-change-monitor-"));
   const staticRoot = join(root, "client");
   await mkdir(staticRoot);
-  await writeFile(join(staticRoot, "index.html"), "<div id=\"root\"></div>");
+  await writeFile(join(staticRoot, "index.html"), '<div id="root"></div>');
   return { root, staticRoot };
 }
 

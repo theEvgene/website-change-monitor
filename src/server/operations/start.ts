@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { AddressInfo } from "node:net";
 
+import type { PageProbeRuntime } from "../browser-playwright/playwright-page-probe.js";
 import { buildHttpServer } from "../http/server.js";
 import {
   openApplicationDatabase,
@@ -14,6 +15,7 @@ export interface StartApplicationOptions {
   port: number;
   version: string;
   openBrowser(url: string): Promise<void>;
+  startPageProbe?(): Promise<PageProbeRuntime>;
 }
 
 export type StartOutcome =
@@ -43,15 +45,20 @@ export async function startApplication(
   const url = `http://127.0.0.1:${options.port}/`;
   let database: ApplicationDatabase | undefined;
   let server: FastifyInstance | undefined;
+  let pageProbeRuntime: PageProbeRuntime | undefined;
   let address: AddressInfo | undefined;
 
   try {
     database = openApplicationDatabase({ rootDirectory: options.rootDirectory });
+    pageProbeRuntime = await options.startPageProbe?.();
     server = buildHttpServer({
       database,
       version: options.version,
       port: options.port,
       staticRoot: options.staticRoot,
+      ...(pageProbeRuntime === undefined
+        ? {}
+        : { pageProbe: pageProbeRuntime.pageProbe }),
     });
     await server.listen({ host: "127.0.0.1", port: options.port });
     const listenerAddress = server.server.address();
@@ -60,7 +67,7 @@ export async function startApplication(
     }
     address = listenerAddress;
   } catch (error: unknown) {
-    await closeResources(server, database);
+    await closeResources(server, database, pageProbeRuntime);
     if (!isAddressInUse(error)) {
       throw error;
     }
@@ -74,11 +81,12 @@ export async function startApplication(
   try {
     await options.openBrowser(url);
   } catch (error: unknown) {
-    await closeResources(server, database);
+    await closeResources(server, database, pageProbeRuntime);
     throw error;
   }
   const startedServer = server;
   const startedDatabase = database;
+  const startedPageProbe = pageProbeRuntime;
   return {
     kind: "started",
     address: {
@@ -87,7 +95,7 @@ export async function startApplication(
       port: address.port,
     },
     async close() {
-      await closeResources(startedServer, startedDatabase);
+      await closeResources(startedServer, startedDatabase, startedPageProbe);
     },
   };
 }
@@ -104,11 +112,15 @@ function isAddressInUse(error: unknown): boolean {
 async function closeResources(
   server: FastifyInstance | undefined,
   database: ApplicationDatabase | undefined,
+  pageProbeRuntime?: PageProbeRuntime,
 ): Promise<void> {
   if (server !== undefined) {
     await server.close();
   }
   if (database !== undefined) {
     database.close();
+  }
+  if (pageProbeRuntime !== undefined) {
+    await pageProbeRuntime.close();
   }
 }

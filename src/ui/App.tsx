@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 
+import { PreviewPanel } from "./PreviewPanel.js";
+
 interface HealthResponse {
   application: "website-change-monitor";
   status: "ready" | "degraded";
@@ -122,6 +124,7 @@ export function App() {
             </>
           ) : null}
         </section>
+        <PreviewPanel />
       </main>
     </div>
   );

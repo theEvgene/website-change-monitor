@@ -21,6 +21,7 @@
 
 ```powershell
 npm ci
+npm run install:chromium
 npm run build
 npm run doctor
 npm start

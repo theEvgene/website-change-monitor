@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { release } from "node:os";
 import { resolve } from "node:path";
 
+import { launchPlaywrightPageProbe } from "./browser-playwright/playwright-page-probe.js";
 import { openInDefaultBrowser } from "./operations/browser.js";
 import { runDoctor } from "./operations/doctor.js";
 import { applicationRoot } from "./operations/paths.js";
@@ -41,6 +42,7 @@ async function main(): Promise<void> {
       port,
       version: applicationVersion(),
       openBrowser: openInDefaultBrowser,
+      startPageProbe: launchPlaywrightPageProbe,
     });
 
     if (outcome.kind === "existing") {

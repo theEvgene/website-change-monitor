@@ -385,4 +385,66 @@ describe("startup UI", () => {
       }),
     );
   });
+
+  it("opens a Comparison from the Journal and returns to the same context", async () => {
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      if (input === "/api/version") {
+        return Promise.resolve(Response.json({
+          application: "website-change-monitor", apiVersion: "v1", version: "0.1.0",
+        }));
+      }
+      if (input === "/api/health") {
+        return Promise.resolve(Response.json({
+          application: "website-change-monitor", status: "degraded", version: "0.1.0",
+          database: { status: "ready", schemaVersion: 3 },
+          telegram: { status: "unavailable", reason: "not_configured" },
+        }));
+      }
+      if (input === "/api/monitors") return Promise.resolve(Response.json([]));
+      if (input === "/api/checks") {
+        return Promise.resolve(Response.json([{
+          id: 22, monitorId: 7, monitorName: "Catalog", kind: "manual",
+          status: "succeeded", result: "change",
+          startedAt: "2026-07-17T09:00:00.000Z",
+          completedAt: "2026-07-17T09:00:01.000Z",
+          errorCode: null, errorMessage: null,
+          beforeSnapshotId: 3, afterSnapshotId: 4,
+        }, {
+          id: 21, monitorId: 7, monitorName: "Catalog", kind: "scheduled",
+          status: "succeeded", result: "no_change",
+          startedAt: "2026-07-17T08:00:00.000Z",
+          completedAt: "2026-07-17T08:00:01.000Z",
+          errorCode: null, errorMessage: null,
+          beforeSnapshotId: 3, afterSnapshotId: 3,
+        }]));
+      }
+      if (input === "/api/checks/22/comparison") {
+        return Promise.resolve(Response.json({
+          checkId: 22, monitorId: 7, monitorName: "Catalog",
+          beforeSnapshotId: 3, afterSnapshotId: 4, complete: true,
+          targets: [{
+            kind: "replace",
+            structure: [{ kind: "equal", before: "html:div", after: "html:div" }],
+            text: [{ kind: "replace", before: "Old product", after: "New product" }],
+          }],
+        }));
+      }
+      throw new Error(`Unexpected request: ${String(input)}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Журнал" }));
+    expect((await screen.findAllByRole("cell", { name: "Catalog" }))[0]).toBeVisible();
+    const comparisonButtons = screen.getAllByRole("button", { name: "Открыть Сравнение" });
+    expect(comparisonButtons).toHaveLength(2);
+    fireEvent.click(comparisonButtons[0]!);
+
+    const dialog = await screen.findByRole("dialog", { name: "Сравнение" });
+    expect(within(dialog).getByText("Old product")).toHaveClass("diff-before");
+    expect(within(dialog).getByText("New product")).toHaveClass("diff-after");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Закрыть" }));
+    expect(screen.queryByRole("dialog", { name: "Сравнение" })).toBeNull();
+    expect(screen.getAllByRole("cell", { name: "Catalog" })[0]).toBeVisible();
+  });
 });

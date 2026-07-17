@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { PreviewPanel } from "./PreviewPanel.js";
 import { MonitorsWorkspace } from "./MonitorsWorkspace.js";
+import { JournalWorkspace } from "./JournalWorkspace.js";
 
 interface HealthResponse {
   application: "website-change-monitor";
@@ -31,6 +32,7 @@ type HealthState =
 export function App() {
   const [state, setState] = useState<HealthState>({ kind: "loading" });
   const [monitorRefresh, setMonitorRefresh] = useState(0);
+  const [activeSection, setActiveSection] = useState<"monitors" | "journal" | "notifications">("monitors");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -79,7 +81,14 @@ export function App() {
         ) : null}
       </header>
 
+      <nav className="top-navigation" aria-label="Основная навигация">
+        <button type="button" aria-current={activeSection === "monitors" ? "page" : undefined} onClick={() => setActiveSection("monitors")}>Мониторы</button>
+        <button type="button" aria-current={activeSection === "journal" ? "page" : undefined} onClick={() => setActiveSection("journal")}>Журнал</button>
+        <button type="button" aria-current={activeSection === "notifications" ? "page" : undefined} onClick={() => setActiveSection("notifications")}>Уведомления</button>
+      </nav>
+
       <main>
+        {activeSection === "monitors" ? <>
         <section className="status-panel" aria-live="polite">
           <p className="eyebrow">Состояние системы</p>
           {state.kind === "loading" ? <h2>Проверяем состояние…</h2> : null}
@@ -128,6 +137,11 @@ export function App() {
         </section>
         <PreviewPanel onMonitorCreated={() => setMonitorRefresh((value) => value + 1)} />
         <MonitorsWorkspace refreshToken={monitorRefresh} />
+        </> : null}
+        {activeSection === "journal" ? <JournalWorkspace /> : null}
+        {activeSection === "notifications" ? (
+          <section className="journal-panel"><p className="eyebrow">Каналы доставки</p><h2>Уведомления</h2><p className="muted">История доставки появится в следующем этапе MVP.</p></section>
+        ) : null}
       </main>
     </div>
   );

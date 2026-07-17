@@ -60,6 +60,14 @@ describe("documented direct HTTP examples", () => {
       example(guide, "powershell-manual-check"),
       port,
     );
+    const journalResult = await runDocumentedExample(
+      example(guide, "powershell-journal"),
+      port,
+    );
+    const comparisonResult = await runDocumentedExample(
+      example(guide, "powershell-comparison"),
+      port,
+    );
 
     expect(JSON.parse(powershellResult)).toMatchObject({
       application: "website-change-monitor",
@@ -108,6 +116,19 @@ describe("documented direct HTTP examples", () => {
         },
         { result: "baseline" },
       ],
+    });
+    const journalJson = JSON.parse(journalResult) as unknown;
+    const journal = Array.isArray(journalJson)
+      ? journalJson
+      : (journalJson as { value: unknown[] }).value;
+    expect(journal).toEqual(expect.arrayContaining([
+      expect.objectContaining({ monitorName: "Catalog", kind: "manual", result: "no_change" }),
+      expect.objectContaining({ monitorName: "Catalog", result: "baseline" }),
+    ]));
+    expect(JSON.parse(comparisonResult)).toMatchObject({
+      monitorName: "Catalog",
+      complete: true,
+      targets: expect.any(Array),
     });
   });
 });

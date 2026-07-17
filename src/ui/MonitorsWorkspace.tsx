@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 
-import { ComparisonModal, type ComparisonResponse } from "./ComparisonModal.js";
+import {
+  ComparisonModal,
+  hasComparableSnapshots,
+  loadComparison,
+  type ComparisonResponse,
+} from "./ComparisonModal.js";
 
 interface MonitorSummary {
   id: number;
@@ -117,7 +122,7 @@ export function MonitorsWorkspace({ refreshToken }: { refreshToken: number }) {
                   <strong>{checkLabel(check)}</strong>
                   <span>{formatDate(check.completedAt ?? check.startedAt)}</span>
                   {check.errorMessage === null ? null : <small>{check.errorMessage}</small>}
-                  {check.beforeSnapshotId !== null && check.afterSnapshotId !== null && check.beforeSnapshotId !== check.afterSnapshotId ? (
+                  {hasComparableSnapshots(check) ? (
                     <button className="table-link" type="button" onClick={() => void openComparison(check.id)}>
                       Открыть Сравнение
                     </button>
@@ -133,10 +138,8 @@ export function MonitorsWorkspace({ refreshToken }: { refreshToken: number }) {
   );
 
   async function openComparison(checkId: number) {
-    const response = await fetch(`/api/checks/${checkId}/comparison`, {
-      headers: { accept: "application/json" },
-    });
-    if (response.ok) setComparison((await response.json()) as ComparisonResponse);
+    const loaded = await loadComparison(checkId);
+    if (loaded !== null) setComparison(loaded);
   }
 
   async function requestManualCheck(id: number) {

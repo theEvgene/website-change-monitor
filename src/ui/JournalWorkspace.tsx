@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 
-import { ComparisonModal, type ComparisonResponse } from "./ComparisonModal.js";
+import {
+  ComparisonModal,
+  hasComparableSnapshots,
+  loadComparison,
+  type ComparisonResponse,
+} from "./ComparisonModal.js";
 
 interface JournalCheck {
   id: number;
@@ -49,7 +54,7 @@ export function JournalWorkspace() {
               <td>{formatDate(check.completedAt ?? check.startedAt)}</td>
               <td>{kindLabel(check.kind)}</td>
               <td>{resultLabel(check)}</td>
-              <td>{canCompare(check) ? (
+              <td>{hasComparableSnapshots(check) ? (
                 <button className="table-link" type="button" onClick={() => void openComparison(check.id)}>
                   Открыть Сравнение
                 </button>
@@ -63,16 +68,9 @@ export function JournalWorkspace() {
   );
 
   async function openComparison(checkId: number) {
-    const response = await fetch(`/api/checks/${checkId}/comparison`, {
-      headers: { accept: "application/json" },
-    });
-    if (response.ok) setComparison((await response.json()) as ComparisonResponse);
+    const loaded = await loadComparison(checkId);
+    if (loaded !== null) setComparison(loaded);
   }
-}
-
-function canCompare(check: JournalCheck): boolean {
-  return check.beforeSnapshotId !== null && check.afterSnapshotId !== null &&
-    check.beforeSnapshotId !== check.afterSnapshotId;
 }
 
 function kindLabel(kind: JournalCheck["kind"]): string {

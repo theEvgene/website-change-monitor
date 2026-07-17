@@ -20,6 +20,23 @@ export interface ComparisonResponse {
   }>;
 }
 
+export interface SnapshotLinks {
+  beforeSnapshotId: number | null;
+  afterSnapshotId: number | null;
+}
+
+export function hasComparableSnapshots(check: SnapshotLinks): boolean {
+  return check.beforeSnapshotId !== null && check.afterSnapshotId !== null &&
+    check.beforeSnapshotId !== check.afterSnapshotId;
+}
+
+export async function loadComparison(checkId: number): Promise<ComparisonResponse | null> {
+  const response = await fetch(`/api/checks/${checkId}/comparison`, {
+    headers: { accept: "application/json" },
+  });
+  return response.ok ? (await response.json()) as ComparisonResponse : null;
+}
+
 export function ComparisonModal({
   comparison,
   onClose,

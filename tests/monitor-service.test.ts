@@ -682,4 +682,38 @@ describe("Monitor use case", () => {
     ]);
     expect(maximumActive).toBe(1);
   });
+
+  it("keeps serving manuals after the fairness threshold when no automatic work is due", async () => {
+    const root = await mkdtemp(join(tmpdir(), "website-change-monitor-"));
+    roots.push(root);
+    const database = openApplicationDatabase({ rootDirectory: root });
+    databases.push(database);
+    const now = "2026-07-17T08:00:00.000Z";
+    const future = "2026-07-18T08:00:00.000Z";
+    for (const name of ["A", "B", "C", "D"]) {
+      const monitorId = database.monitors.createMonitor({
+        name, url: `https://example.com/${name}`,
+        targetSelectors: ["main"], exclusionSelectors: [], intervalHours: 6,
+      }, future);
+      database.monitors.enqueueManualCheck(monitorId, now);
+    }
+    const preview = vi.fn<PageProbe["preview"]>().mockImplementation(async (input) =>
+      successfulPageProbeResult(
+        input.url, [{ selector: "main", matchCount: 1 }],
+        simplePagePreviewTargets("Product"),
+      ),
+    );
+    const service = createMonitorService({
+      database, pageProbe: { preview }, clock: { now: () => new Date(now) },
+    });
+
+    await service.runAvailableChecks();
+
+    expect(service.listJournal().map((check) => check.kind)).toEqual([
+      "manual", "manual", "manual", "manual",
+    ]);
+    expect(database.monitors.listActiveIntents()).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: "manual" })]),
+    );
+  });
 });

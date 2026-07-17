@@ -261,7 +261,11 @@ export function createMonitorStore(
   `);
 
   const claimTransaction = database.transaction((now: string, preferAutomatic = false) => {
-    const intent = (preferAutomatic ? selectNextAutomaticIntent : selectNextIntent).get(now) as
+    const intent = (
+      preferAutomatic
+        ? (selectNextAutomaticIntent.get(now) ?? selectNextIntent.get(now))
+        : selectNextIntent.get(now)
+    ) as
       | {
           id: number;
           monitor_id: number;

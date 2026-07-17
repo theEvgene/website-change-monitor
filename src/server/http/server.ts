@@ -6,7 +6,10 @@ import { PageProbeError, type PageProbe } from "../application/page-probe.js";
 import {
   createMonitorService,
   MonitorInputError,
+  MonitorScopeResetRequired,
+  MonitorDeleteConfirmationError,
   type MonitorView,
+  type UpdateMonitorInput,
 } from "../application/monitor-service.js";
 import { previewPage, PreviewInputError } from "../application/preview-page.js";
 import type { ApplicationDatabase } from "../persistence/database.js";
@@ -30,6 +33,8 @@ import {
   monitorCheckListResponseSchemaV1,
   monitorCheckSchemaV1,
   monitorCreateRequestSchemaV1,
+  monitorUpdateRequestSchemaV1,
+  monitorDeleteRequestSchemaV1,
   monitorDetailSchemaV1,
   monitorListResponseSchemaV1,
   monitorSummarySchemaV1,
@@ -41,6 +46,8 @@ import {
   requestManualCheckRouteSchema,
   pauseMonitorRouteSchema,
   resumeMonitorRouteSchema,
+  updateMonitorRouteSchema,
+  deleteMonitorRouteSchema,
   versionResponseSchemaV1,
   versionRouteSchema,
 } from "./contract.js";
@@ -162,6 +169,8 @@ export function buildHttpServer(
     apiServer.addSchema(previewRequestSchemaV1);
     apiServer.addSchema(previewResponseSchemaV1);
     apiServer.addSchema(monitorCreateRequestSchemaV1);
+    apiServer.addSchema(monitorUpdateRequestSchemaV1);
+    apiServer.addSchema(monitorDeleteRequestSchemaV1);
     apiServer.addSchema(monitorCheckSchemaV1);
     apiServer.addSchema(monitorSummarySchemaV1);
     apiServer.addSchema(monitorListResponseSchemaV1);
@@ -242,6 +251,7 @@ export function buildHttpServer(
         targetSelectors: string[];
         exclusionSelectors: string[];
         intervalHours: number;
+        labels?: string[];
       };
     }>(
       "/api/monitors",
@@ -277,10 +287,38 @@ export function buildHttpServer(
       },
     );
 
-    apiServer.get(
+    apiServer.get<{ Querystring: { label?: string } }>(
       "/api/monitors",
       { schema: listMonitorsRouteSchema },
-      async () => monitors.listMonitors(),
+      async (request) => monitors.listMonitors(request.query.label),
+    );
+
+    apiServer.put<{ Params: { monitorId: number }; Body: UpdateMonitorInput }>(
+      "/api/monitors/:monitorId", { schema: updateMonitorRouteSchema }, async (request, reply) => {
+        try {
+          const monitor = await monitors.updateMonitor(request.params.monitorId, request.body);
+          if (monitor === undefined) return reply.code(404).send(apiError("not_found", "Монитор не найден."));
+          return publicMonitor(monitor);
+        } catch (error: unknown) {
+          if (error instanceof MonitorScopeResetRequired) return reply.code(409).send(apiError("scope_reset_required", error.message));
+          if (error instanceof MonitorInputError || error instanceof PreviewInputError) return reply.code(400).send(apiError(error.code, error.message));
+          if (error instanceof PageProbeError) return reply.code(pageProbeStatus(error.code)).send(apiError(error.code, error.message));
+          throw error;
+        }
+      },
+    );
+
+    apiServer.delete<{ Params: { monitorId: number }; Body: { confirmName: string } }>(
+      "/api/monitors/:monitorId", { schema: deleteMonitorRouteSchema }, async (request, reply) => {
+        try {
+          const deleted = monitors.deleteMonitor(request.params.monitorId, request.body.confirmName);
+          if (deleted === undefined) return reply.code(404).send(apiError("not_found", "Монитор не найден."));
+          return reply.code(204).send();
+        } catch (error: unknown) {
+          if (error instanceof MonitorDeleteConfirmationError) return reply.code(400).send(apiError("delete_confirmation_required", error.message));
+          throw error;
+        }
+      },
     );
 
     apiServer.get<{ Params: { monitorId: number } }>(

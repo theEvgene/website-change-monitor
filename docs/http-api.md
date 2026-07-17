@@ -95,13 +95,32 @@ Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:43117/api/monitors' -Conte
 Прочитать сохранённые данные можно через:
 
 - `GET /api/monitors` — компактная таблица Мониторов;
+- `GET /api/monitors?label=важное` — таблица Мониторов с выбранной Меткой;
 - `GET /api/monitors/{monitorId}` — Монитор, его селекторы и История;
+- `PUT /api/monitors/{monitorId}` — изменить имя, URL, Интервал проверки, Метки и упорядоченные массивы селекторов;
+- `DELETE /api/monitors/{monitorId}` — удалить Монитор и его данные после передачи точного имени в `confirmName`;
 - `GET /api/monitors/{monitorId}/checks` — только Проверки выбранного Монитора.
 - `GET /api/checks` — общий Журнал всех Проверок, от новых к старым;
 - `GET /api/checks/{checkId}/comparison` — двухколоночное Сравнение снимков известной Проверки.
 - `GET /api/check-intents` — активная очередь с видом, состоянием и сроком каждой ожидающей или выполняющейся Проверки.
 - `POST /api/monitors/{monitorId}/pause` — приостановить автоматические Проверки, сохранив Историю и Ручную проверку;
 - `POST /api/monitors/{monitorId}/resume` — возобновить Монитор, начиная с ожидающей Повторной либо одной Просроченной проверки.
+
+Имя, Интервал проверки, Метки и перестановка тех же селекторов обновляются без потери Истории. Изменение URL, состава или значения Целевых селекторов либо Селекторов исключения сначала возвращает `409` с кодом `scope_reset_required`. Повторный `PUT` с `resetHistory: true` атомарно повышает ревизию Области наблюдения, удаляет прежние Проверки и Снимки и запускает новый Базовый снимок. Работа старой ревизии не может записать результат после такого сброса.
+
+Пример изменения только организационных полей:
+
+```powershell
+$body = @{ name = 'Каталог'; url = 'https://example.com/catalog'; targetSelectors = @('.card', '.hero'); exclusionSelectors = @('.price'); intervalHours = 24; labels = @('важное', 'магазин') } | ConvertTo-Json
+Invoke-RestMethod -Method Put -Uri 'http://127.0.0.1:43117/api/monitors/1' -ContentType 'application/json' -Body $body
+```
+
+Удаление требует точного имени и сохраняет общие Метки других Мониторов:
+
+```powershell
+$body = @{ confirmName = 'Каталог' } | ConvertTo-Json
+Invoke-RestMethod -Method Delete -Uri 'http://127.0.0.1:43117/api/monitors/1' -ContentType 'application/json' -Body $body
+```
 
 Запустить Ручную проверку первого сохранённого Монитора и получить её долговечный результат:
 

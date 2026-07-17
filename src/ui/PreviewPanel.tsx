@@ -65,6 +65,7 @@ export function PreviewPanel({
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>(emptyFieldErrors);
   const [state, setState] = useState<PreviewState>({ kind: "idle" });
   const [monitorName, setMonitorName] = useState("");
+  const [monitorLabels, setMonitorLabels] = useState("");
   const [intervalHours, setIntervalHours] = useState(24);
   const [saveState, setSaveState] = useState<
     { kind: "idle" | "saving" | "saved" } | { kind: "error"; message: string }
@@ -153,6 +154,7 @@ export function PreviewPanel({
           name: monitorName.trim(),
           ...state.input,
           intervalHours,
+          labels: monitorLabels.split(",").map((value) => value.trim()).filter(Boolean),
         }),
       });
       const body = (await response.json()) as ApiErrorBody;
@@ -328,6 +330,10 @@ export function PreviewPanel({
                     setSaveState({ kind: "idle" });
                   }}
                 />
+              </label>
+              <label>
+                <span>Метки через запятую</span>
+                <input value={monitorLabels} onChange={(event) => { setMonitorLabels(event.target.value); setSaveState({ kind: "idle" }); }} />
               </label>
               <label>
                 <span>Интервал проверки</span>

@@ -32,6 +32,12 @@ export interface CreateMonitorInput {
   targetSelectors: string[];
   exclusionSelectors: string[];
   intervalHours: number;
+  labels?: string[];
+}
+
+export interface UpdateMonitorInput extends CreateMonitorInput {
+  labels: string[];
+  resetHistory?: boolean;
 }
 
 export type MonitorView = MonitorRecord;
@@ -51,6 +57,20 @@ export class MonitorInputError extends Error {
   }
 }
 
+export class MonitorScopeResetRequired extends Error {
+  constructor() {
+    super("Изменение Области наблюдения удалит Историю. Подтвердите сброс.");
+    this.name = "MonitorScopeResetRequired";
+  }
+}
+
+export class MonitorDeleteConfirmationError extends Error {
+  constructor() {
+    super("Введите точное имя Монитора для удаления.");
+    this.name = "MonitorDeleteConfirmationError";
+  }
+}
+
 export class SnapshotError extends Error {
   constructor(
     readonly code: "snapshot_invalid" | "snapshot_too_large",
@@ -63,8 +83,10 @@ export class SnapshotError extends Error {
 
 export interface MonitorService {
   createMonitor(input: CreateMonitorInput): Promise<MonitorView>;
+  updateMonitor(id: number, input: UpdateMonitorInput): Promise<MonitorView | undefined>;
+  deleteMonitor(id: number, confirmName: string): boolean | undefined;
   requestManualCheck(id: number): Promise<MonitorView | undefined>;
-  listMonitors(): MonitorSummary[];
+  listMonitors(label?: string): MonitorSummary[];
   listJournal(): JournalCheckRecord[];
   listActiveIntents(): CheckIntentRecord[];
   getComparison(id: number):
@@ -130,6 +152,7 @@ export function createMonitorService(options: {
         orchestrationTimeoutMs,
       );
       if (discardCurrentResult) return;
+      if (!options.database.monitors.isCurrentRevision(claimed.monitorId, claimed.scopeRevision)) continue;
       const completedAt = clock.now();
       const nextCheckAt = new Date(
         completedAt.getTime() + claimed.intervalHours * 60 * 60 * 1_000,
@@ -218,6 +241,25 @@ export function createMonitorService(options: {
       }
       return monitor;
     },
+    async updateMonitor(id, input) {
+      const current = options.database.monitors.getMonitor(id);
+      if (current === undefined) return undefined;
+      const validated = validateMonitorInput(input);
+      const resetScope = current.url !== validated.url ||
+        !sameSelectorSet(current.targetSelectors, validated.targetSelectors) ||
+        !sameSelectorSet(current.exclusionSelectors, validated.exclusionSelectors);
+      if (resetScope && input.resetHistory !== true) throw new MonitorScopeResetRequired();
+      if (resetScope) await previewPage(validated, options.pageProbe);
+      options.database.monitors.updateMonitor(id, { ...validated, labels: validated.labels ?? [], resetScope }, clock.now().toISOString());
+      if (resetScope && !current.paused) await runAvailableChecks();
+      return options.database.monitors.getMonitor(id);
+    },
+    deleteMonitor(id, confirmName) {
+      const current = options.database.monitors.getMonitor(id);
+      if (current === undefined) return undefined;
+      if (confirmName !== current.name) throw new MonitorDeleteConfirmationError();
+      return options.database.monitors.deleteMonitor(id);
+    },
     async requestManualCheck(id) {
       const enqueued = options.database.monitors.enqueueManualCheck(
         id,
@@ -229,7 +271,7 @@ export function createMonitorService(options: {
       await runAvailableChecks();
       return options.database.monitors.getMonitor(id);
     },
-    listMonitors: () => options.database.monitors.listMonitors(),
+    listMonitors: (label) => options.database.monitors.listMonitors(label),
     listJournal: () => options.database.monitors.listJournal(),
     listActiveIntents: () => options.database.monitors.listActiveIntents(),
     getComparison(id) {
@@ -325,7 +367,24 @@ function validateMonitorInput(input: CreateMonitorInput): CreateMonitorRecord {
     name,
     ...previewInput,
     intervalHours: input.intervalHours as CreateMonitorRecord["intervalHours"],
+    labels: normalizeLabels(input.labels ?? []),
   };
+}
+
+function normalizeLabels(labels: string[]): string[] {
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const value of labels) {
+    const label = value.trim().normalize("NFC");
+    if (label === "") continue;
+    const key = label.toUpperCase().toLowerCase();
+    if (!seen.has(key)) { seen.add(key); result.push(label); }
+  }
+  return result;
+}
+
+function sameSelectorSet(left: string[], right: string[]): boolean {
+  return left.length === right.length && new Set(left).size === new Set(right).size && left.every((value) => right.includes(value));
 }
 
 function createSnapshot(preview: PagePreview): {

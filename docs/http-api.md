@@ -76,6 +76,30 @@ Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:43117/api/preview' -Conten
 }
 ```
 
+После успешного preview создать Монитор и сразу выполнить его первую Проверку:
+
+<!-- verify:powershell-create-monitor -->
+```powershell
+$body = @{
+  name = 'Catalog'
+  url = 'https://example.com/catalog'
+  targetSelectors = @('.page-title', '.product-card')
+  exclusionSelectors = @('.price')
+  intervalHours = 12
+} | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:43117/api/monitors' -ContentType 'application/json' -Body $body | ConvertTo-Json -Compress -Depth 12
+```
+
+`POST /api/monitors` повторно проверяет URL и селекторы, сохраняет Монитор и немедленную Проверку. Первый успешный результат имеет `result: "baseline"`, содержит метаданные Базового снимка и не считается Изменением. Допустимые значения `intervalHours`: `6`, `12`, `24`, `48`, `72`.
+
+Прочитать сохранённые данные можно через:
+
+- `GET /api/monitors` — компактная таблица Мониторов;
+- `GET /api/monitors/{monitorId}` — Монитор, его селекторы и История;
+- `GET /api/monitors/{monitorId}/checks` — только Проверки выбранного Монитора.
+
+В ответах API Снимок содержит `id`, `formatVersion` и `sha256`; канонический JSON остаётся внутренним долговечным представлением и через HTTP не публикуется.
+
 `targetSelectors` содержит минимум один уникальный после `trim` стандартный CSS-селектор; `exclusionSelectors` может быть пустым. Каждый Целевой селектор обязан найти хотя бы один элемент. Совпадения объединяются без дублей и сортируются по DOM, поэтому порядок массивов не задаёт порядок результата. Каждый Селектор исключения удаляет совпавшие поддеревья внутри каждого элемента Целевой области из структуры и видимого текста.
 
 Если итоговая Целевая область превышает встроенный бюджет элементов или текста, preview целиком отклоняется с `target_area_too_large` (HTTP 422) без частичного результата. В этом случае сузьте Целевые селекторы или добавьте Селекторы исключения.

@@ -29,6 +29,9 @@ describe("public HTTP contract", () => {
     expect(document.info.version).toBe("0.1.0");
     expect(Object.keys(document.paths).sort()).toEqual([
       "/api/health",
+      "/api/monitors",
+      "/api/monitors/{monitorId}",
+      "/api/monitors/{monitorId}/checks",
       "/api/preview",
       "/api/version",
     ]);
@@ -36,10 +39,28 @@ describe("public HTTP contract", () => {
     expect(document.paths["/api/preview"]?.post?.operationId).toBe(
       "previewObservationScope",
     );
+    expect(document.paths["/api/monitors"]?.post?.operationId).toBe(
+      "createMonitor",
+    );
+    expect(document.paths["/api/monitors"]?.get?.operationId).toBe(
+      "listMonitors",
+    );
+    expect(document.paths["/api/monitors/{monitorId}"]?.get?.operationId).toBe(
+      "getMonitor",
+    );
+    expect(
+      document.paths["/api/monitors/{monitorId}/checks"]?.get?.operationId,
+    ).toBe("listMonitorChecks");
     expect(document.paths["/api/version"]?.get?.operationId).toBe("getVersion");
     expect(Object.keys(document.components.schemas).sort()).toEqual([
       "ApiErrorV1",
       "HealthResponseV1",
+      "MonitorCheckListResponseV1",
+      "MonitorCheckV1",
+      "MonitorCreateRequestV1",
+      "MonitorDetailV1",
+      "MonitorListResponseV1",
+      "MonitorSummaryV1",
       "PreviewRequestV1",
       "PreviewResponseV1",
       "VersionResponseV1",

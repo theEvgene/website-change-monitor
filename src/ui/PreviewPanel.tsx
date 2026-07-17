@@ -31,7 +31,15 @@ interface ApiErrorBody {
 type PreviewState =
   | { kind: "idle" }
   | { kind: "loading" }
-  | { kind: "success"; result: PreviewResponse }
+  | {
+      kind: "success";
+      result: PreviewResponse;
+      input: {
+        url: string;
+        targetSelectors: string[];
+        exclusionSelectors: string[];
+      };
+    }
   | { kind: "error"; message: string };
 
 type FieldErrors = Record<PreviewSelectorField, Record<number, string>>;
@@ -41,7 +49,11 @@ const emptyFieldErrors = (): FieldErrors => ({
   exclusionSelectors: {},
 });
 
-export function PreviewPanel() {
+export function PreviewPanel({
+  onMonitorCreated,
+}: {
+  onMonitorCreated?: () => void;
+}) {
   const [url, setUrl] = useState("");
   const [selectors, setSelectors] = useState<
     Record<PreviewSelectorField, string[]>
@@ -52,6 +64,11 @@ export function PreviewPanel() {
   const { targetSelectors, exclusionSelectors } = selectors;
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>(emptyFieldErrors);
   const [state, setState] = useState<PreviewState>({ kind: "idle" });
+  const [monitorName, setMonitorName] = useState("");
+  const [intervalHours, setIntervalHours] = useState(24);
+  const [saveState, setSaveState] = useState<
+    { kind: "idle" | "saving" | "saved" } | { kind: "error"; message: string }
+  >({ kind: "idle" });
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -106,7 +123,7 @@ export function PreviewPanel() {
           apiError?.message ?? "Не удалось исследовать страницу.",
         );
       }
-      setState({ kind: "success", result: body });
+      setState({ kind: "success", result: body, input: validated });
     } catch (error: unknown) {
       setState({
         kind: "error",
@@ -114,6 +131,41 @@ export function PreviewPanel() {
           error instanceof Error
             ? error.message
             : "Не удалось исследовать страницу.",
+      });
+    }
+  }
+
+  async function saveMonitor() {
+    if (state.kind !== "success") return;
+    if (monitorName.trim() === "") {
+      setSaveState({ kind: "error", message: "Введите имя Монитора." });
+      return;
+    }
+    setSaveState({ kind: "saving" });
+    try {
+      const response = await fetch("/api/monitors", {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          name: monitorName.trim(),
+          ...state.input,
+          intervalHours,
+        }),
+      });
+      const body = (await response.json()) as ApiErrorBody;
+      if (!response.ok) {
+        throw new Error(body.error?.message ?? "Не удалось сохранить Монитор.");
+      }
+      setSaveState({ kind: "saved" });
+      onMonitorCreated?.();
+    } catch (error: unknown) {
+      setSaveState({
+        kind: "error",
+        message:
+          error instanceof Error ? error.message : "Не удалось сохранить Монитор.",
       });
     }
   }
@@ -266,6 +318,43 @@ export function PreviewPanel() {
               ))}
             </ol>
             <span>Итоговый URL: {state.result.finalUrl}</span>
+            <div className="monitor-save-form">
+              <label>
+                <span>Имя Монитора</span>
+                <input
+                  value={monitorName}
+                  onChange={(event) => {
+                    setMonitorName(event.target.value);
+                    setSaveState({ kind: "idle" });
+                  }}
+                />
+              </label>
+              <label>
+                <span>Интервал проверки</span>
+                <select
+                  value={intervalHours}
+                  onChange={(event) => {
+                    setIntervalHours(Number(event.target.value));
+                    setSaveState({ kind: "idle" });
+                  }}
+                >
+                  {[6, 12, 24, 48, 72].map((hours) => (
+                    <option key={hours} value={hours}>{hours} часов</option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                onClick={() => void saveMonitor()}
+                disabled={saveState.kind === "saving"}
+              >
+                {saveState.kind === "saving" ? "Сохраняем…" : "Сохранить Монитор"}
+              </button>
+              {saveState.kind === "saved" ? <strong>Монитор сохранён.</strong> : null}
+              {saveState.kind === "error" ? (
+                <strong className="preview-error">{saveState.message}</strong>
+              ) : null}
+            </div>
           </>
         ) : null}
         {state.kind === "error" ? (

@@ -230,6 +230,100 @@ main {
   color: #a43b35;
 }
 
+.monitor-save-form {
+  display: grid;
+  grid-template-columns: minmax(12rem, 1fr) minmax(10rem, 0.5fr) auto;
+  gap: 12px;
+  align-items: end;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #e0e6ee;
+}
+
+.monitor-save-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.monitor-save-form input,
+.monitor-save-form select {
+  min-height: 40px;
+  padding: 8px 10px;
+  color: inherit;
+  background: #fff;
+  border: 1px solid #cbd4df;
+  border-radius: 6px;
+}
+
+.monitors-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(18rem, 0.34fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.monitors-table-panel,
+.monitor-history {
+  padding: 20px;
+  background: #fff;
+  border: 1px solid #e0e6ee;
+  border-radius: 8px;
+}
+
+.dense-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.dense-table th,
+.dense-table td {
+  padding: 9px 10px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid #e0e6ee;
+}
+
+.table-link {
+  padding: 0;
+  color: #2257a8;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+}
+
+.monitor-next-check {
+  font-weight: 700;
+}
+
+.monitor-settings,
+.history-list {
+  display: grid;
+  gap: 8px;
+}
+
+.monitor-settings div,
+.history-list li {
+  display: grid;
+  gap: 3px;
+}
+
+.monitor-settings dt {
+  color: #637083;
+  font-size: 12px;
+}
+
+.monitor-settings dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.history-list {
+  padding-left: 20px;
+}
+
 .headline-row {
   display: flex;
   gap: 20px;
@@ -329,5 +423,10 @@ main {
 
   .preview-form .selector-remove {
     justify-self: start;
+  }
+
+  .monitor-save-form,
+  .monitors-workspace {
+    grid-template-columns: 1fr;
   }
 }

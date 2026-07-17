@@ -3,6 +3,11 @@ import fastifySwagger from "@fastify/swagger";
 import Fastify, { type FastifyInstance } from "fastify";
 
 import { PageProbeError, type PageProbe } from "../application/page-probe.js";
+import {
+  createMonitorService,
+  MonitorInputError,
+  type MonitorView,
+} from "../application/monitor-service.js";
 import { previewPage, PreviewInputError } from "../application/preview-page.js";
 import type { ApplicationDatabase } from "../persistence/database.js";
 import {
@@ -10,8 +15,18 @@ import {
   apiErrorSchemaV1,
   apiVersion,
   applicationId,
+  createMonitorRouteSchema,
+  getMonitorRouteSchema,
   healthResponseSchemaV1,
   healthRouteSchema,
+  listMonitorChecksRouteSchema,
+  listMonitorsRouteSchema,
+  monitorCheckListResponseSchemaV1,
+  monitorCheckSchemaV1,
+  monitorCreateRequestSchemaV1,
+  monitorDetailSchemaV1,
+  monitorListResponseSchemaV1,
+  monitorSummarySchemaV1,
   previewRequestSchemaV1,
   previewResponseSchemaV1,
   previewRouteSchema,
@@ -31,6 +46,11 @@ export function buildHttpServer(
   options: BuildHttpServerOptions,
 ): FastifyInstance {
   const server = Fastify({ logger: false, trustProxy: false });
+  const pageProbe = options.pageProbe ?? unavailablePageProbe;
+  const monitors = createMonitorService({
+    database: options.database,
+    pageProbe,
+  });
 
   server.addHook("onRequest", async (request, reply) => {
     const allowedHosts = new Set([
@@ -110,6 +130,12 @@ export function buildHttpServer(
     apiServer.addSchema(versionResponseSchemaV1);
     apiServer.addSchema(previewRequestSchemaV1);
     apiServer.addSchema(previewResponseSchemaV1);
+    apiServer.addSchema(monitorCreateRequestSchemaV1);
+    apiServer.addSchema(monitorCheckSchemaV1);
+    apiServer.addSchema(monitorSummarySchemaV1);
+    apiServer.addSchema(monitorListResponseSchemaV1);
+    apiServer.addSchema(monitorDetailSchemaV1);
+    apiServer.addSchema(monitorCheckListResponseSchemaV1);
 
     apiServer.get("/api/health", { schema: healthRouteSchema }, async () => {
       const database = options.database.diagnostics();
@@ -147,7 +173,7 @@ export function buildHttpServer(
         try {
           return await previewPage(
             request.body,
-            options.pageProbe ?? unavailablePageProbe,
+            pageProbe,
           );
         } catch (error: unknown) {
           if (error instanceof PreviewInputError) {
@@ -173,6 +199,77 @@ export function buildHttpServer(
       },
     );
 
+    apiServer.post<{
+      Body: {
+        name: string;
+        url: string;
+        targetSelectors: string[];
+        exclusionSelectors: string[];
+        intervalHours: number;
+      };
+    }>(
+      "/api/monitors",
+      { schema: createMonitorRouteSchema },
+      async (request, reply) => {
+        try {
+          const monitor = await monitors.createMonitor(request.body);
+          return reply.code(201).send(publicMonitor(monitor));
+        } catch (error: unknown) {
+          if (error instanceof MonitorInputError) {
+            return reply.code(400).send(apiError(error.code, error.message));
+          }
+          if (error instanceof PreviewInputError) {
+            return reply.code(400).send(
+              apiError(error.code, error.message, {
+                ...(error.field === undefined ? {} : { field: error.field }),
+                ...(error.index === undefined ? {} : { index: error.index }),
+              }),
+            );
+          }
+          if (error instanceof PageProbeError) {
+            return reply
+              .code(pageProbeStatus(error.code))
+              .send(apiError(error.code, error.message));
+          }
+          throw error;
+        }
+      },
+    );
+
+    apiServer.get(
+      "/api/monitors",
+      { schema: listMonitorsRouteSchema },
+      async () => monitors.listMonitors(),
+    );
+
+    apiServer.get<{ Params: { monitorId: number } }>(
+      "/api/monitors/:monitorId",
+      { schema: getMonitorRouteSchema },
+      async (request, reply) => {
+        const monitor = monitors.getMonitor(request.params.monitorId);
+        if (monitor === undefined) {
+          return reply
+            .code(404)
+            .send(apiError("not_found", "Монитор не найден."));
+        }
+        return publicMonitor(monitor);
+      },
+    );
+
+    apiServer.get<{ Params: { monitorId: number } }>(
+      "/api/monitors/:monitorId/checks",
+      { schema: listMonitorChecksRouteSchema },
+      async (request, reply) => {
+        const monitor = monitors.getMonitor(request.params.monitorId);
+        if (monitor === undefined) {
+          return reply
+            .code(404)
+            .send(apiError("not_found", "Монитор не найден."));
+        }
+        return publicMonitor(monitor).history;
+      },
+    );
+
     apiServer.get(
       "/openapi.json",
       { schema: { hide: true } },
@@ -188,6 +285,23 @@ export function buildHttpServer(
   }
 
   return server;
+}
+
+function publicMonitor(monitor: MonitorView) {
+  return {
+    ...monitor,
+    history: monitor.history.map((check) => ({
+      ...check,
+      snapshot:
+        check.snapshot === null
+          ? null
+          : {
+              id: check.snapshot.id,
+              formatVersion: check.snapshot.formatVersion,
+              sha256: check.snapshot.sha256,
+            },
+    })),
+  };
 }
 
 const unavailablePageProbe: PageProbe = {

@@ -368,7 +368,7 @@ describe("startup UI", () => {
       within(historyPanel!).getByRole("button", { name: "Запустить сейчас" }),
     );
     expect(
-      await within(historyPanel!).findByText("Без изменений"),
+      await within(historyPanel!).findByText("Ручная проверка · Без изменений"),
     ).toBeVisible();
     expect(manualRequested).toBe(true);
     expect(fetchMock).toHaveBeenCalledWith(

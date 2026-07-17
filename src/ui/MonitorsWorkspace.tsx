@@ -12,6 +12,8 @@ interface MonitorSummary {
 
 interface MonitorCheck {
   id: number;
+  kind: "scheduled" | "overdue" | "manual" | "retry";
+  status: "running" | "succeeded" | "failed";
   result: "baseline" | "no_change" | "change" | "error" | null;
   startedAt: string;
   completedAt: string | null;
@@ -107,7 +109,7 @@ export function MonitorsWorkspace({ refreshToken }: { refreshToken: number }) {
             <ol className="history-list">
               {selected.history.map((check) => (
                 <li key={check.id}>
-                  <strong>{resultLabel(check.result)}</strong>
+                  <strong>{checkLabel(check)}</strong>
                   <span>{formatDate(check.completedAt ?? check.startedAt)}</span>
                   {check.errorMessage === null ? null : <small>{check.errorMessage}</small>}
                 </li>
@@ -170,6 +172,15 @@ function resultLabel(result: MonitorCheck["result"]): string {
   if (result === "change") return "Обнаружено Изменение";
   if (result === "error") return "Ошибка";
   return "Ожидается";
+}
+
+function checkLabel(check: MonitorCheck): string {
+  const result =
+    check.status === "running" ? "Выполняется" : resultLabel(check.result);
+  if (check.kind === "manual") return `Ручная проверка · ${result}`;
+  if (check.kind === "retry") return `Повторная проверка · ${result}`;
+  if (check.kind === "overdue") return `Просроченная проверка · ${result}`;
+  return result;
 }
 
 function formatDate(value: string | null): string {

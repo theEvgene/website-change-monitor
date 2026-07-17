@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import BetterSqlite3 from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createMonitorService } from "../src/server/application/monitor-service.js";
@@ -372,6 +373,68 @@ describe("Monitor use case", () => {
       }),
       expect.objectContaining({
         result: "baseline",
+        snapshot: expect.objectContaining({ id: 1 }),
+      }),
+    ]);
+  });
+
+  it("rolls back a partially completed Change transaction and keeps the previous baseline", async () => {
+    const root = await mkdtemp(join(tmpdir(), "website-change-monitor-"));
+    roots.push(root);
+    const database = openApplicationDatabase({ rootDirectory: root });
+    databases.push(database);
+    const observed = (text: string) =>
+      successfulPageProbeResult(
+        "https://example.com/catalog",
+        [{ selector: ".card", matchCount: 1 }],
+        simplePagePreviewTargets(text),
+      );
+    const baseline = observed("Product A");
+    const preview = vi
+      .fn<PageProbe["preview"]>()
+      .mockResolvedValueOnce(baseline)
+      .mockResolvedValueOnce(baseline)
+      .mockResolvedValueOnce(observed("Product B"))
+      .mockResolvedValueOnce(baseline);
+    const service = createMonitorService({ database, pageProbe: { preview } });
+    const monitor = await service.createMonitor({
+      name: "Catalog",
+      url: "https://example.com/catalog",
+      targetSelectors: [".card"],
+      exclusionSelectors: [],
+      intervalHours: 6,
+    });
+    const sabotage = new BetterSqlite3(database.path);
+    sabotage.exec(`
+      CREATE TRIGGER reject_new_current_snapshot
+      BEFORE UPDATE OF current_snapshot_id ON monitors
+      WHEN NEW.current_snapshot_id <> OLD.current_snapshot_id
+      BEGIN
+        SELECT RAISE(ABORT, 'forced transaction failure');
+      END;
+    `);
+
+    await service.requestManualCheck(monitor.id);
+    sabotage.exec("DROP TRIGGER reject_new_current_snapshot");
+    sabotage.close();
+    const recovered = await service.requestManualCheck(monitor.id);
+
+    expect(recovered?.history).toEqual([
+      expect.objectContaining({
+        result: "no_change",
+        beforeSnapshotId: 1,
+        afterSnapshotId: 1,
+      }),
+      expect.objectContaining({
+        result: "error",
+        errorCode: "snapshot_invalid",
+        beforeSnapshotId: null,
+        afterSnapshotId: null,
+        snapshot: null,
+      }),
+      expect.objectContaining({
+        result: "baseline",
+        afterSnapshotId: 1,
         snapshot: expect.objectContaining({ id: 1 }),
       }),
     ]);

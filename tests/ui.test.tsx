@@ -409,6 +409,13 @@ describe("startup UI", () => {
           completedAt: "2026-07-17T09:00:01.000Z",
           errorCode: null, errorMessage: null,
           beforeSnapshotId: 3, afterSnapshotId: 4,
+        }, {
+          id: 21, monitorId: 7, monitorName: "Catalog", kind: "scheduled",
+          status: "succeeded", result: "no_change",
+          startedAt: "2026-07-17T08:00:00.000Z",
+          completedAt: "2026-07-17T08:00:01.000Z",
+          errorCode: null, errorMessage: null,
+          beforeSnapshotId: 3, afterSnapshotId: 3,
         }]));
       }
       if (input === "/api/checks/22/comparison") {
@@ -428,14 +435,16 @@ describe("startup UI", () => {
     render(<App />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Журнал" }));
-    expect(await screen.findByRole("cell", { name: "Catalog" })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Открыть Сравнение" }));
+    expect((await screen.findAllByRole("cell", { name: "Catalog" }))[0]).toBeVisible();
+    const comparisonButtons = screen.getAllByRole("button", { name: "Открыть Сравнение" });
+    expect(comparisonButtons).toHaveLength(2);
+    fireEvent.click(comparisonButtons[0]!);
 
     const dialog = await screen.findByRole("dialog", { name: "Сравнение" });
     expect(within(dialog).getByText("Old product")).toHaveClass("diff-before");
     expect(within(dialog).getByText("New product")).toHaveClass("diff-after");
     fireEvent.click(within(dialog).getByRole("button", { name: "Закрыть" }));
     expect(screen.queryByRole("dialog", { name: "Сравнение" })).toBeNull();
-    expect(screen.getByRole("cell", { name: "Catalog" })).toBeVisible();
+    expect(screen.getAllByRole("cell", { name: "Catalog" })[0]).toBeVisible();
   });
 });

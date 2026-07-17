@@ -26,8 +26,7 @@ export interface SnapshotLinks {
 }
 
 export function hasComparableSnapshots(check: SnapshotLinks): boolean {
-  return check.beforeSnapshotId !== null && check.afterSnapshotId !== null &&
-    check.beforeSnapshotId !== check.afterSnapshotId;
+  return check.beforeSnapshotId !== null && check.afterSnapshotId !== null;
 }
 
 export async function loadComparison(checkId: number): Promise<ComparisonResponse | null> {

@@ -3,6 +3,20 @@ import type BetterSqlite3 from "better-sqlite3";
 export type CheckIntentKind = "scheduled" | "overdue" | "manual" | "retry";
 export type CheckStatus = "running" | "succeeded" | "failed";
 export type CheckResult = "baseline" | "no_change" | "change" | "error";
+export type CheckIntentState = "queued" | "running" | "finished" | "cancelled";
+
+export interface CheckIntentRecord {
+  id: number;
+  monitorId: number;
+  monitorName: string;
+  scopeRevision: number;
+  kind: CheckIntentKind;
+  state: CheckIntentState;
+  dueAt: string;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
 
 export interface CreateMonitorRecord {
   name: string;
@@ -54,6 +68,7 @@ export interface MonitorRecord {
   intervalHours: 6 | 12 | 24 | 48 | 72;
   scopeRevision: number;
   nextCheckAt: string | null;
+  activeIntent: CheckIntentRecord | null;
   history: MonitorCheckRecord[];
 }
 
@@ -65,6 +80,7 @@ export interface MonitorSummaryRecord {
   scopeRevision: number;
   nextCheckAt: string | null;
   latestCheckResult: CheckResult | null;
+  activeIntent: CheckIntentRecord | null;
 }
 
 export interface JournalCheckRecord {
@@ -95,7 +111,8 @@ export interface ComparisonSnapshotPair {
 export interface MonitorStore {
   createMonitor(input: CreateMonitorRecord, now: string): number;
   enqueueManualCheck(monitorId: number, now: string): boolean | undefined;
-  claimNextCheck(now: string): ClaimedCheck | undefined;
+  reconcileSchedule(now: string, recoverOverdue: boolean): void;
+  claimNextCheck(now: string, preferAutomatic?: boolean): ClaimedCheck | undefined;
   completeBaseline(
     claimed: ClaimedCheck,
     snapshot: SnapshotRecord,
@@ -121,6 +138,7 @@ export interface MonitorStore {
   ): void;
   listMonitors(): MonitorSummaryRecord[];
   listJournal(): JournalCheckRecord[];
+  listActiveIntents(): CheckIntentRecord[];
   getComparison(checkId: number): ComparisonSnapshotPair | undefined;
   getMonitor(id: number): MonitorRecord | undefined;
 }
@@ -164,9 +182,10 @@ export function createMonitorStore(
   const selectMonitorRevision = database.prepare(`
     SELECT scope_revision FROM monitors WHERE id = ?
   `);
-  const selectActiveIntent = database.prepare(`
+  const selectActiveManualIntent = database.prepare(`
     SELECT id FROM check_intents
     WHERE monitor_id = ? AND state IN ('queued', 'running')
+      AND (kind = 'manual' OR state = 'running')
     LIMIT 1
   `);
   const insertManualIntent = database.prepare(`
@@ -182,7 +201,7 @@ export function createMonitorStore(
       if (monitor === undefined) {
         return undefined;
       }
-      if (selectActiveIntent.get(monitorId) !== undefined) {
+      if (selectActiveManualIntent.get(monitorId) !== undefined) {
         return false;
       }
       insertManualIntent.run(monitorId, monitor.scope_revision, now, now);
@@ -199,6 +218,17 @@ export function createMonitorStore(
       WHEN 'retry' THEN 1
       WHEN 'overdue' THEN 2
       ELSE 3
+    END, due_at, id
+    LIMIT 1
+  `);
+  const selectNextAutomaticIntent = database.prepare(`
+    SELECT id, monitor_id, scope_revision, kind
+    FROM check_intents
+    WHERE state = 'queued' AND due_at <= ? AND kind <> 'manual'
+    ORDER BY CASE kind
+      WHEN 'retry' THEN 0
+      WHEN 'overdue' THEN 1
+      ELSE 2
     END, due_at, id
     LIMIT 1
   `);
@@ -230,8 +260,12 @@ export function createMonitorStore(
     WHERE monitor_id = ? ORDER BY position
   `);
 
-  const claimTransaction = database.transaction((now: string) => {
-    const intent = selectNextIntent.get(now) as
+  const claimTransaction = database.transaction((now: string, preferAutomatic = false) => {
+    const intent = (
+      preferAutomatic
+        ? (selectNextAutomaticIntent.get(now) ?? selectNextIntent.get(now))
+        : selectNextIntent.get(now)
+    ) as
       | {
           id: number;
           monitor_id: number;
@@ -320,6 +354,39 @@ export function createMonitorStore(
     SET next_check_at = ?, updated_at = ?
     WHERE id = ? AND scope_revision = ?
   `);
+  const cancelQueuedAutomatic = database.prepare(`
+    UPDATE check_intents
+    SET state = 'cancelled', finished_at = ?
+    WHERE monitor_id = ? AND state = 'queued'
+      AND kind IN ('scheduled', 'overdue')
+  `);
+  const insertScheduledIntent = database.prepare(`
+    INSERT INTO check_intents (
+      monitor_id, scope_revision, kind, state, due_at, created_at
+    ) VALUES (?, ?, 'scheduled', 'queued', ?, ?)
+  `);
+
+  function replaceOrdinarySchedule(
+    claimed: ClaimedCheck,
+    completedAt: string,
+    nextCheckAt: string,
+  ): void {
+    cancelQueuedAutomatic.run(completedAt, claimed.monitorId);
+    insertScheduledIntent.run(
+      claimed.monitorId,
+      claimed.scopeRevision,
+      nextCheckAt,
+      completedAt,
+    );
+    assertChanged(
+      scheduleMonitor.run(
+        nextCheckAt,
+        completedAt,
+        claimed.monitorId,
+        claimed.scopeRevision,
+      ).changes,
+    );
+  }
   const setCurrentSnapshot = database.prepare(`
     UPDATE monitors SET current_snapshot_id = ?
     WHERE id = ? AND scope_revision = ?
@@ -359,14 +426,7 @@ export function createMonitorStore(
         ).changes,
       );
       assertChanged(finishIntent.run(completedAt, claimed.intentId).changes);
-      assertChanged(
-        scheduleMonitor.run(
-          nextCheckAt,
-          completedAt,
-          claimed.monitorId,
-          claimed.scopeRevision,
-        ).changes,
-      );
+      replaceOrdinarySchedule(claimed, completedAt, nextCheckAt);
     },
   );
 
@@ -385,14 +445,7 @@ export function createMonitorStore(
         ).changes,
       );
       assertChanged(finishIntent.run(completedAt, claimed.intentId).changes);
-      assertChanged(
-        scheduleMonitor.run(
-          nextCheckAt,
-          completedAt,
-          claimed.monitorId,
-          claimed.scopeRevision,
-        ).changes,
-      );
+      replaceOrdinarySchedule(claimed, completedAt, nextCheckAt);
     },
   );
 
@@ -433,14 +486,7 @@ export function createMonitorStore(
         ).changes,
       );
       assertChanged(finishIntent.run(completedAt, claimed.intentId).changes);
-      assertChanged(
-        scheduleMonitor.run(
-          nextCheckAt,
-          completedAt,
-          claimed.monitorId,
-          claimed.scopeRevision,
-        ).changes,
-      );
+      replaceOrdinarySchedule(claimed, completedAt, nextCheckAt);
     },
   );
 
@@ -460,20 +506,44 @@ export function createMonitorStore(
         ).changes,
       );
       assertChanged(finishIntent.run(completedAt, claimed.intentId).changes);
-      assertChanged(
-        scheduleMonitor.run(
-          nextCheckAt,
-          completedAt,
-          claimed.monitorId,
-          claimed.scopeRevision,
-        ).changes,
-      );
+      replaceOrdinarySchedule(claimed, completedAt, nextCheckAt);
     },
   );
 
   return {
     createMonitor: createMonitorTransaction,
     enqueueManualCheck: enqueueManualTransaction,
+    reconcileSchedule(now, recoverOverdue) {
+      database.transaction(() => {
+        if (recoverOverdue) {
+          database.prepare(`
+            UPDATE check_intents AS i
+            SET kind = 'overdue'
+            WHERE i.state = 'queued' AND i.kind = 'scheduled' AND i.due_at <= ?
+              AND EXISTS (
+                SELECT 1 FROM monitors m
+                WHERE m.id = i.monitor_id AND m.current_snapshot_id IS NOT NULL
+              )
+          `).run(now);
+        }
+        database.prepare(`
+          INSERT INTO check_intents (
+            monitor_id, scope_revision, kind, state, due_at, created_at
+          )
+          SELECT m.id, m.scope_revision,
+                 CASE WHEN m.next_check_at < @now AND @recover = 1
+                      THEN 'overdue' ELSE 'scheduled' END,
+                 'queued', m.next_check_at, @now
+          FROM monitors m
+          WHERE m.next_check_at IS NOT NULL
+            AND NOT EXISTS (
+              SELECT 1 FROM check_intents i
+              WHERE i.monitor_id = m.id AND i.state IN ('queued', 'running')
+                AND i.kind IN ('scheduled', 'overdue', 'retry')
+            )
+        `).run({ now, recover: recoverOverdue ? 1 : 0 });
+      })();
+    },
     claimNextCheck: claimTransaction,
     completeBaseline: completeBaselineTransaction,
     completeNoChange: completeNoChangeTransaction,
@@ -485,8 +555,18 @@ export function createMonitorStore(
           SELECT m.id, m.name, m.url, m.interval_hours, m.scope_revision,
                  m.next_check_at,
                  (SELECT c.result FROM checks c
-                  WHERE c.monitor_id = m.id ORDER BY c.id DESC LIMIT 1) latest_result
+                  WHERE c.monitor_id = m.id ORDER BY c.id DESC LIMIT 1) latest_result,
+                 i.id intent_id, i.kind intent_kind, i.state intent_state,
+                 i.scope_revision intent_scope_revision, i.due_at intent_due_at,
+                 i.created_at intent_created_at, i.started_at intent_started_at,
+                 i.finished_at intent_finished_at
           FROM monitors m
+          LEFT JOIN check_intents i ON i.id = (
+            SELECT ai.id FROM check_intents ai
+            WHERE ai.monitor_id = m.id AND ai.state IN ('queued', 'running')
+            ORDER BY CASE ai.state WHEN 'running' THEN 0 ELSE 1 END,
+                     ai.due_at, ai.id LIMIT 1
+          )
           ORDER BY m.id
         `)
         .all() as Array<{
@@ -497,6 +577,14 @@ export function createMonitorStore(
         scope_revision: number;
         next_check_at: string | null;
         latest_result: CheckResult | null;
+        intent_id: number | null;
+        intent_kind: CheckIntentKind | null;
+        intent_state: CheckIntentState | null;
+        intent_scope_revision: number | null;
+        intent_due_at: string | null;
+        intent_created_at: string | null;
+        intent_started_at: string | null;
+        intent_finished_at: string | null;
       }>;
       return rows.map((row) => ({
         id: row.id,
@@ -506,7 +594,27 @@ export function createMonitorStore(
         scopeRevision: row.scope_revision,
         nextCheckAt: row.next_check_at,
         latestCheckResult: row.latest_result,
+        activeIntent: intentFromJoinedRow(row, row.name),
       }));
+    },
+    listActiveIntents() {
+      const rows = database.prepare(`
+        SELECT i.id, i.monitor_id, m.name monitor_name, i.scope_revision,
+               i.kind, i.state, i.due_at, i.created_at, i.started_at, i.finished_at
+        FROM check_intents i
+        JOIN monitors m ON m.id = i.monitor_id
+        WHERE i.state IN ('queued', 'running')
+        ORDER BY CASE i.state WHEN 'running' THEN 0 ELSE 1 END,
+                 CASE i.kind WHEN 'manual' THEN 0 WHEN 'retry' THEN 1
+                   WHEN 'overdue' THEN 2 ELSE 3 END,
+                 i.due_at, i.id
+      `).all() as Array<{
+        id: number; monitor_id: number; monitor_name: string;
+        scope_revision: number; kind: CheckIntentKind; state: CheckIntentState;
+        due_at: string; created_at: string; started_at: string | null;
+        finished_at: string | null;
+      }>;
+      return rows.map(intentFromRow);
     },
     listJournal() {
       const rows = database
@@ -639,6 +747,7 @@ export function createMonitorStore(
         intervalHours: row.interval_hours,
         scopeRevision: row.scope_revision,
         nextCheckAt: row.next_check_at,
+        activeIntent: this.listActiveIntents().find((intent) => intent.monitorId === id) ?? null,
         history: checks.map((check) => ({
           id: check.id,
           kind: check.kind,
@@ -665,6 +774,37 @@ export function createMonitorStore(
         })),
       };
     },
+  };
+}
+
+function intentFromRow(row: {
+  id: number; monitor_id: number; monitor_name: string; scope_revision: number;
+  kind: CheckIntentKind; state: CheckIntentState; due_at: string;
+  created_at: string; started_at: string | null; finished_at: string | null;
+}): CheckIntentRecord {
+  return {
+    id: row.id, monitorId: row.monitor_id, monitorName: row.monitor_name,
+    scopeRevision: row.scope_revision, kind: row.kind, state: row.state,
+    dueAt: row.due_at, createdAt: row.created_at,
+    startedAt: row.started_at, finishedAt: row.finished_at,
+  };
+}
+
+function intentFromJoinedRow(row: {
+  id: number; intent_id: number | null; intent_kind: CheckIntentKind | null;
+  intent_state: CheckIntentState | null; intent_scope_revision: number | null;
+  intent_due_at: string | null; intent_created_at: string | null;
+  intent_started_at: string | null; intent_finished_at: string | null;
+}, monitorName: string): CheckIntentRecord | null {
+  if (row.intent_id === null || row.intent_kind === null || row.intent_state === null ||
+      row.intent_scope_revision === null || row.intent_due_at === null ||
+      row.intent_created_at === null) return null;
+  return {
+    id: row.intent_id, monitorId: row.id, monitorName,
+    scopeRevision: row.intent_scope_revision, kind: row.intent_kind,
+    state: row.intent_state, dueAt: row.intent_due_at,
+    createdAt: row.intent_created_at, startedAt: row.intent_started_at,
+    finishedAt: row.intent_finished_at,
   };
 }
 

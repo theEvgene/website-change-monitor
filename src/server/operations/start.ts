@@ -16,6 +16,7 @@ export interface StartApplicationOptions {
   version: string;
   openBrowser(url: string): Promise<void>;
   startPageProbe?(): Promise<PageProbeRuntime>;
+  workerIntervalMs?: number;
 }
 
 export type StartOutcome =
@@ -59,6 +60,9 @@ export async function startApplication(
       ...(pageProbeRuntime === undefined
         ? {}
         : { pageProbe: pageProbeRuntime.pageProbe }),
+      ...(options.workerIntervalMs === undefined
+        ? {}
+        : { workerIntervalMs: options.workerIntervalMs }),
     });
     await server.listen({ host: "127.0.0.1", port: options.port });
     const listenerAddress = server.server.address();

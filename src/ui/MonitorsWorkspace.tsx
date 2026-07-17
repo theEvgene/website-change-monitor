@@ -15,6 +15,13 @@ interface MonitorSummary {
   scopeRevision: number;
   nextCheckAt: string | null;
   latestCheckResult: "baseline" | "no_change" | "change" | "error" | null;
+  activeIntent?: ActiveIntent | null;
+}
+
+interface ActiveIntent {
+  kind: "scheduled" | "overdue" | "manual" | "retry";
+  state: "queued" | "running";
+  dueAt: string;
 }
 
 interface MonitorCheck {
@@ -79,7 +86,7 @@ export function MonitorsWorkspace({ refreshToken }: { refreshToken: number }) {
           <table className="dense-table">
             <thead>
               <tr>
-                <th>Монитор</th><th>Интервал</th><th>Последняя Проверка</th><th>Следующая Проверка</th>
+                <th>Монитор</th><th>Интервал</th><th>Последняя Проверка</th><th>Состояние</th><th>Следующая Проверка</th>
               </tr>
             </thead>
             <tbody>
@@ -88,6 +95,7 @@ export function MonitorsWorkspace({ refreshToken }: { refreshToken: number }) {
                   <td><button className="table-link" type="button" onClick={() => void loadMonitor(monitor.id, undefined, setSelected)}>{monitor.name}</button></td>
                   <td>{monitor.intervalHours} ч</td>
                   <td>{resultLabel(monitor.latestCheckResult)}</td>
+                  <td>{activeIntentLabel(monitor.activeIntent)}</td>
                   <td>{formatDate(monitor.nextCheckAt)}</td>
                 </tr>
               ))}
@@ -101,6 +109,9 @@ export function MonitorsWorkspace({ refreshToken }: { refreshToken: number }) {
           <>
             <h2>{selected.name}</h2>
             <p className="monitor-next-check">Следующая Проверка: {formatDate(selected.nextCheckAt)}</p>
+            {selected.activeIntent == null ? null : (
+              <p className="monitor-queue-state">{activeIntentLabel(selected.activeIntent)}</p>
+            )}
             <button
               className="secondary-button"
               type="button"
@@ -209,4 +220,13 @@ function formatDate(value: string | null): string {
   return new Intl.DateTimeFormat("ru-RU", {
     dateStyle: "short", timeStyle: "short", timeZone: "Europe/Moscow",
   }).format(new Date(value));
+}
+
+function activeIntentLabel(intent: ActiveIntent | null | undefined): string {
+  if (intent == null) return "Нет ожидающей Проверки";
+  const state = intent.state === "running" ? "Выполняется" : "Ожидает";
+  if (intent.kind === "manual") return `${state}: Ручная проверка`;
+  if (intent.kind === "retry") return `${state}: Повторная проверка`;
+  if (intent.kind === "overdue") return `${state}: Просроченная проверка`;
+  return `${state}: Плановая проверка`;
 }

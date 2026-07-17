@@ -16,6 +16,8 @@ import {
   apiVersion,
   applicationId,
   comparisonResponseSchemaV1,
+  checkIntentSchemaV1,
+  checkIntentListResponseSchemaV1,
   createMonitorRouteSchema,
   getMonitorRouteSchema,
   getComparisonRouteSchema,
@@ -23,6 +25,7 @@ import {
   healthRouteSchema,
   listMonitorChecksRouteSchema,
   listJournalRouteSchema,
+  listCheckIntentsRouteSchema,
   listMonitorsRouteSchema,
   monitorCheckListResponseSchemaV1,
   monitorCheckSchemaV1,
@@ -46,6 +49,7 @@ export interface BuildHttpServerOptions {
   port: number;
   pageProbe?: PageProbe;
   staticRoot?: string;
+  workerIntervalMs?: number;
 }
 
 export function buildHttpServer(
@@ -57,9 +61,18 @@ export function buildHttpServer(
     database: options.database,
     pageProbe,
   });
+  let workerTimer: ReturnType<typeof setInterval> | undefined;
 
   server.addHook("onReady", async () => {
     await monitors.runAvailableChecks();
+    workerTimer = setInterval(() => {
+      void monitors.runAvailableChecks();
+    }, options.workerIntervalMs ?? 1_000);
+    workerTimer.unref();
+  });
+
+  server.addHook("onClose", async () => {
+    if (workerTimer !== undefined) clearInterval(workerTimer);
   });
 
   server.addHook("onRequest", async (request, reply) => {
@@ -149,6 +162,8 @@ export function buildHttpServer(
     apiServer.addSchema(journalCheckSchemaV1);
     apiServer.addSchema(journalResponseSchemaV1);
     apiServer.addSchema(comparisonResponseSchemaV1);
+    apiServer.addSchema(checkIntentSchemaV1);
+    apiServer.addSchema(checkIntentListResponseSchemaV1);
 
     apiServer.get("/api/health", { schema: healthRouteSchema }, async () => {
       const database = options.database.diagnostics();
@@ -308,6 +323,12 @@ export function buildHttpServer(
       "/api/checks",
       { schema: listJournalRouteSchema },
       async () => monitors.listJournal(),
+    );
+
+    apiServer.get(
+      "/api/check-intents",
+      { schema: listCheckIntentsRouteSchema },
+      async () => monitors.listActiveIntents(),
     );
 
     apiServer.get<{ Params: { checkId: number } }>(

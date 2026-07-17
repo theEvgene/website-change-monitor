@@ -28,6 +28,7 @@ describe("public HTTP contract", () => {
     expect(document.openapi).toBe("3.1.0");
     expect(document.info.version).toBe("0.1.0");
     expect(Object.keys(document.paths).sort()).toEqual([
+      "/api/check-intents",
       "/api/checks",
       "/api/checks/{checkId}/comparison",
       "/api/health",
@@ -39,6 +40,7 @@ describe("public HTTP contract", () => {
     ]);
     expect(document.paths["/api/health"]?.get?.operationId).toBe("getHealth");
     expect(document.paths["/api/checks"]?.get?.operationId).toBe("listJournal");
+    expect(document.paths["/api/check-intents"]?.get?.operationId).toBe("listCheckIntents");
     expect(document.paths["/api/checks/{checkId}/comparison"]?.get?.operationId).toBe("getComparison");
     expect(document.paths["/api/preview"]?.post?.operationId).toBe(
       "previewObservationScope",
@@ -61,6 +63,8 @@ describe("public HTTP contract", () => {
     expect(document.paths["/api/version"]?.get?.operationId).toBe("getVersion");
     expect(Object.keys(document.components.schemas).sort()).toEqual([
       "ApiErrorV1",
+      "CheckIntentListResponseV1",
+      "CheckIntentV1",
       "ComparisonResponseV1",
       "HealthResponseV1",
       "JournalCheckV1",

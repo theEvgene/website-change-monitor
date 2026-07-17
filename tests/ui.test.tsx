@@ -225,6 +225,10 @@ describe("startup UI", () => {
       intervalHours: 24,
       scopeRevision: 1,
       nextCheckAt: "2026-07-18T08:00:00.000Z",
+      activeIntent: {
+        kind: "scheduled", state: "queued",
+        dueAt: "2026-07-18T08:00:00.000Z",
+      },
       history: [
         {
           id: 11,
@@ -295,6 +299,7 @@ describe("startup UI", () => {
                       scopeRevision: 1,
                       nextCheckAt: created.nextCheckAt,
                       latestCheckResult: "baseline",
+                      activeIntent: created.activeIntent,
                     },
                   ]
                 : [],
@@ -364,6 +369,7 @@ describe("startup UI", () => {
       await within(historyPanel!).findByText("Базовый снимок"),
     ).toBeVisible();
     expect(within(historyPanel!).getByText(/Следующая Проверка:/u)).toBeVisible();
+    expect(within(historyPanel!).getByText("Ожидает: Плановая проверка")).toBeVisible();
     fireEvent.click(
       within(historyPanel!).getByRole("button", { name: "Запустить сейчас" }),
     );

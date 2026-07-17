@@ -251,6 +251,7 @@ describe("startup UI", () => {
     let saved = false;
     let manualRequested = false;
     let paused = false;
+    let pauseFailures = 1;
     const fetchMock = vi.fn().mockImplementation(
       (input: RequestInfo | URL, init?: RequestInit) => {
         if (input === "/api/version") {
@@ -333,6 +334,10 @@ describe("startup UI", () => {
           );
         }
         if (input === "/api/monitors/7/pause" && init?.method === "POST") {
+          if (pauseFailures > 0) {
+            pauseFailures -= 1;
+            return Promise.resolve(Response.json({}, { status: 500 }));
+          }
           paused = true;
           return Promise.resolve(Response.json({ ...created, paused }));
         }
@@ -381,6 +386,8 @@ describe("startup UI", () => {
     ).toBeVisible();
     expect(within(historyPanel!).getByText(/Следующая Проверка:/u)).toBeVisible();
     expect(within(historyPanel!).getByText("Ожидает: Плановая проверка")).toBeVisible();
+    fireEvent.click(within(historyPanel!).getByRole("button", { name: "Приостановить" }));
+    expect(await within(historyPanel!).findByRole("alert")).toHaveTextContent("Не удалось приостановить");
     fireEvent.click(within(historyPanel!).getByRole("button", { name: "Приостановить" }));
     expect(await within(historyPanel!).findByText("Автоматические Проверки приостановлены")).toBeVisible();
     fireEvent.click(within(historyPanel!).getByRole("button", { name: "Возобновить" }));

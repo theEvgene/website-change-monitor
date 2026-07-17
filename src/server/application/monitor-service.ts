@@ -102,6 +102,7 @@ export function createMonitorService(options: {
   let recoverOverdue = true;
   let consecutiveManualChecks = 0;
   let stopping = false;
+  let discardCurrentResult = false;
   const orchestrationTimeoutMs = options.orchestrationTimeoutMs ?? 75_000;
 
   async function drainChecks(): Promise<void> {
@@ -128,6 +129,7 @@ export function createMonitorService(options: {
         }),
         orchestrationTimeoutMs,
       );
+      if (discardCurrentResult) return;
       const completedAt = clock.now();
       const nextCheckAt = new Date(
         completedAt.getTime() + claimed.intervalHours * 60 * 60 * 1_000,
@@ -267,6 +269,7 @@ export function createMonitorService(options: {
       ]);
       if (timeout !== undefined) clearTimeout(timeout);
       if (!completed) {
+        discardCurrentResult = true;
         options.database.monitors.recoverInterrupted(clock.now().toISOString());
       }
     },

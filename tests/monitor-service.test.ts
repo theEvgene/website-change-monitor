@@ -850,6 +850,77 @@ describe("Monitor use case", () => {
     });
   });
 
+  it("lets an already running automatic Check finish when pause wins the race", async () => {
+    const root = await mkdtemp(join(tmpdir(), "website-change-monitor-"));
+    roots.push(root);
+    const database = openApplicationDatabase({ rootDirectory: root });
+    databases.push(database);
+    const observed = successfulPageProbeResult(
+      "https://example.com/catalog",
+      [{ selector: ".card", matchCount: 1 }],
+      simplePagePreviewTargets("Product"),
+    );
+    let release!: (result: PageProbeResult) => void;
+    let started!: () => void;
+    const began = new Promise<void>((resolve) => { started = resolve; });
+    const pending = new Promise<PageProbeResult>((resolve) => { release = resolve; });
+    const preview = vi.fn<PageProbe["preview"]>()
+      .mockResolvedValueOnce(observed).mockResolvedValueOnce(observed)
+      .mockImplementationOnce(async () => { started(); return pending; });
+    let now = new Date("2026-07-17T08:00:00.000Z");
+    const service = createMonitorService({ database, pageProbe: { preview }, clock: { now: () => now } });
+    const monitor = await service.createMonitor({
+      name: "Catalog", url: "https://example.com/catalog",
+      targetSelectors: [".card"], exclusionSelectors: [], intervalHours: 6,
+    });
+
+    now = new Date("2026-07-17T14:00:00.000Z");
+    const automatic = service.runAvailableChecks();
+    await began;
+    const pause = service.setPaused(monitor.id, true);
+    release(observed);
+    await Promise.all([automatic, pause]);
+
+    expect(service.getMonitor(monitor.id)).toMatchObject({
+      paused: true,
+      history: [
+        { kind: "scheduled", result: "no_change" },
+        { result: "baseline" },
+      ],
+    });
+  });
+
+  it("coalesces concurrent resume and manual click on an elapsed deadline", async () => {
+    const root = await mkdtemp(join(tmpdir(), "website-change-monitor-"));
+    roots.push(root);
+    const database = openApplicationDatabase({ rootDirectory: root });
+    databases.push(database);
+    const observed = successfulPageProbeResult(
+      "https://example.com/catalog",
+      [{ selector: ".card", matchCount: 1 }],
+      simplePagePreviewTargets("Product"),
+    );
+    const preview = vi.fn<PageProbe["preview"]>().mockResolvedValue(observed);
+    let now = new Date("2026-07-17T08:00:00.000Z");
+    const service = createMonitorService({ database, pageProbe: { preview }, clock: { now: () => now } });
+    const monitor = await service.createMonitor({
+      name: "Catalog", url: "https://example.com/catalog",
+      targetSelectors: [".card"], exclusionSelectors: [], intervalHours: 6,
+    });
+    await service.setPaused(monitor.id, true);
+    now = new Date("2026-07-17T15:00:00.000Z");
+
+    await Promise.all([
+      service.setPaused(monitor.id, false),
+      service.requestManualCheck(monitor.id),
+    ]);
+
+    expect(service.getMonitor(monitor.id)?.history.map((check) => check.kind)).toEqual([
+      "manual", "scheduled",
+    ]);
+    expect(preview).toHaveBeenCalledTimes(3);
+  });
+
   it("keeps a retry waiting while paused and runs it first on resume", async () => {
     const root = await mkdtemp(join(tmpdir(), "website-change-monitor-"));
     roots.push(root);
@@ -867,7 +938,8 @@ describe("Monitor use case", () => {
     };
     const preview = vi.fn<PageProbe["preview"]>()
       .mockResolvedValueOnce(observed).mockResolvedValueOnce(observed)
-      .mockResolvedValueOnce(failure).mockResolvedValueOnce(observed);
+      .mockResolvedValueOnce(failure).mockResolvedValueOnce(failure)
+      .mockResolvedValueOnce(observed);
     let now = new Date("2026-07-17T08:00:00.000Z");
     const service = createMonitorService({ database, pageProbe: { preview }, clock: { now: () => now } });
     const monitor = await service.createMonitor({
@@ -878,17 +950,21 @@ describe("Monitor use case", () => {
 
     now = new Date("2026-07-17T09:00:00.000Z");
     await service.requestManualCheck(monitor.id);
+    now = new Date("2026-07-17T09:00:30.000Z");
+    await service.requestManualCheck(monitor.id);
     now = new Date("2026-07-17T09:02:00.000Z");
     await service.runAvailableChecks();
     expect(service.getMonitor(monitor.id)).toMatchObject({
       paused: true, activeIntent: { kind: "retry", state: "queued" },
     });
+    expect(database.monitors.listActiveIntents().filter((intent) => intent.kind === "retry")).toHaveLength(1);
 
     await service.setPaused(monitor.id, false);
     expect(service.getMonitor(monitor.id)).toMatchObject({
       paused: false,
       history: [
         { kind: "retry", result: "no_change" },
+        { kind: "manual", result: "error", isFinalError: false },
         { kind: "manual", result: "error", isFinalError: false },
         { result: "baseline" },
       ],
@@ -941,7 +1017,7 @@ describe("Monitor use case", () => {
       orchestrationTimeoutMs: 10_000,
     });
 
-    const running = service.runAvailableChecks().catch(() => undefined);
+    const running = service.runAvailableChecks();
     await began;
     await service.stop(10);
 
@@ -949,11 +1025,13 @@ describe("Monitor use case", () => {
       activeIntent: { kind: "retry", state: "queued" },
       history: [{ errorCode: "application_shutdown", isFinalError: false }],
     });
+    database.close();
+    databases.splice(databases.indexOf(database), 1);
     release(successfulPageProbeResult(
       "https://example.com/catalog",
       [{ selector: ".card", matchCount: 1 }],
       simplePagePreviewTargets("Product"),
     ));
-    await running;
+    await expect(running).resolves.toBeUndefined();
   });
 });

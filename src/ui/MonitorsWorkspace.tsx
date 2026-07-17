@@ -50,6 +50,7 @@ export function MonitorsWorkspace({ refreshToken }: { refreshToken: number }) {
   const [manualBusy, setManualBusy] = useState(false);
   const [manualError, setManualError] = useState<string | null>(null);
   const [pauseBusy, setPauseBusy] = useState(false);
+  const [pauseError, setPauseError] = useState<string | null>(null);
   const [comparison, setComparison] = useState<ComparisonResponse | null>(null);
 
   useEffect(() => {
@@ -124,6 +125,7 @@ export function MonitorsWorkspace({ refreshToken }: { refreshToken: number }) {
             >
               {manualBusy ? "Проверка выполняется…" : "Запустить сейчас"}
             </button>
+            {pauseError === null ? null : <p className="form-error" role="alert">{pauseError}</p>}
             <button
               className="secondary-button"
               type="button"
@@ -198,6 +200,7 @@ export function MonitorsWorkspace({ refreshToken }: { refreshToken: number }) {
 
   async function changePaused(id: number, paused: boolean) {
     setPauseBusy(true);
+    setPauseError(null);
     try {
       const response = await fetch(`/api/monitors/${id}/${paused ? "pause" : "resume"}`, {
         method: "POST", headers: { accept: "application/json" },
@@ -208,6 +211,10 @@ export function MonitorsWorkspace({ refreshToken }: { refreshToken: number }) {
       setMonitors((items) => items.map((item) => item.id === id
         ? { ...item, paused: monitor.paused, nextCheckAt: monitor.nextCheckAt, activeIntent: monitor.activeIntent }
         : item));
+    } catch {
+      setPauseError(paused
+        ? "Не удалось приостановить автоматические Проверки."
+        : "Не удалось возобновить автоматические Проверки.");
     } finally {
       setPauseBusy(false);
     }

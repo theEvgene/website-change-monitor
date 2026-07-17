@@ -513,34 +513,49 @@ export function createMonitorStore(
     },
   );
 
-  const failCheckTransaction = database.transaction(
-    (
-      claimed: ClaimedCheck,
-      error: { code: string; message: string },
-      completedAt: string,
-      nextCheckAt: string,
-    ) => {
-      const finalError = claimed.kind === "retry";
-      assertChanged(failCheckStatement.run(
-        error.code, error.message, completedAt, finalError ? 1 : 0,
-        claimed.checkId,
+  function recordFailureTransition(
+    identity: Pick<ClaimedCheck,
+      "checkId" | "intentId" | "kind" | "monitorId" | "scopeRevision">,
+    error: { code: string; message: string },
+    completedAt: string,
+    nextCheckAt: string,
+  ): void {
+    const finalError = identity.kind === "retry";
+    assertChanged(failCheckStatement.run(
+      error.code, error.message, completedAt, finalError ? 1 : 0,
+      identity.checkId,
+    ).changes);
+    assertChanged(finishIntent.run(completedAt, identity.intentId).changes);
+    if (finalError) {
+      cancelQueuedAutomatic.run(completedAt, identity.monitorId);
+      insertScheduledIntent.run(
+        identity.monitorId, identity.scopeRevision, nextCheckAt, completedAt,
+      );
+      assertChanged(scheduleMonitor.run(
+        nextCheckAt, completedAt, identity.monitorId, identity.scopeRevision,
       ).changes);
-      assertChanged(finishIntent.run(completedAt, claimed.intentId).changes);
-      if (finalError) {
-        replaceOrdinarySchedule(claimed, completedAt, nextCheckAt);
-      } else {
-        const retryAt = new Date(new Date(completedAt).getTime() + 60_000).toISOString();
-        cancelQueuedAutomatic.run(completedAt, claimed.monitorId);
-        insertRetryIntent.run(
-          claimed.monitorId, claimed.scopeRevision, retryAt, completedAt,
-          claimed.checkId,
-        );
-        assertChanged(scheduleMonitor.run(
-          retryAt, completedAt, claimed.monitorId, claimed.scopeRevision,
-        ).changes);
-      }
-    },
-  );
+      return;
+    }
+    const retryAt = new Date(new Date(completedAt).getTime() + 60_000).toISOString();
+    cancelQueuedAutomatic.run(completedAt, identity.monitorId);
+    const existingRetry = selectQueuedRetryDue.get(identity.monitorId) as
+      | { due_at: string }
+      | undefined;
+    if (existingRetry === undefined) {
+      insertRetryIntent.run(
+        identity.monitorId, identity.scopeRevision, retryAt, completedAt,
+        identity.checkId,
+      );
+    }
+    assertChanged(scheduleMonitor.run(
+      existingRetry?.due_at ?? retryAt,
+      completedAt,
+      identity.monitorId,
+      identity.scopeRevision,
+    ).changes);
+  }
+
+  const failCheckTransaction = database.transaction(recordFailureTransition);
 
   const selectPauseState = database.prepare(`
     SELECT id, scope_revision, current_snapshot_id, next_check_at
@@ -602,29 +617,24 @@ export function createMonitorStore(
       interval_hours: 6 | 12 | 24 | 48 | 72;
     }>;
     for (const row of rows) {
-      const finalError = row.kind === "retry";
-      assertChanged(failCheckStatement.run(
-        "application_shutdown",
-        "Проверка была прервана завершением приложения.",
+      const nextAt = new Date(
+        new Date(now).getTime() + row.interval_hours * 60 * 60 * 1_000,
+      ).toISOString();
+      recordFailureTransition(
+        {
+          checkId: row.check_id,
+          intentId: row.intent_id,
+          kind: row.kind,
+          monitorId: row.monitor_id,
+          scopeRevision: row.scope_revision,
+        },
+        {
+          code: "application_shutdown",
+          message: "Проверка была прервана завершением приложения.",
+        },
         now,
-        finalError ? 1 : 0,
-        row.check_id,
-      ).changes);
-      assertChanged(finishIntent.run(now, row.intent_id).changes);
-      cancelQueuedAutomatic.run(now, row.monitor_id);
-      if (finalError) {
-        const nextAt = new Date(
-          new Date(now).getTime() + row.interval_hours * 60 * 60 * 1_000,
-        ).toISOString();
-        insertScheduledIntent.run(row.monitor_id, row.scope_revision, nextAt, now);
-        scheduleMonitor.run(nextAt, now, row.monitor_id, row.scope_revision);
-      } else {
-        const retryAt = new Date(new Date(now).getTime() + 60_000).toISOString();
-        insertRetryIntent.run(
-          row.monitor_id, row.scope_revision, retryAt, now, row.check_id,
-        );
-        scheduleMonitor.run(retryAt, now, row.monitor_id, row.scope_revision);
-      }
+        nextAt,
+      );
     }
   });
 

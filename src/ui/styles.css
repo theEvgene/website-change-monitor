@@ -103,10 +103,12 @@ main {
 
 .preview-form {
   display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) auto;
-  gap: 14px;
-  align-items: end;
+  gap: 18px;
   margin-top: 26px;
+}
+
+.preview-url-field {
+  max-width: 720px;
 }
 
 .preview-form label {
@@ -148,6 +150,62 @@ main {
   opacity: 0.7;
 }
 
+.selector-group {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #d3dbe5;
+  border-radius: 8px;
+}
+
+.selector-group legend {
+  padding: 0 6px;
+  color: #344255;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.selector-list {
+  display: grid;
+  gap: 10px;
+}
+
+.selector-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.preview-form .selector-add,
+.preview-form .selector-remove {
+  color: #295f9f;
+  background: #f5f8fc;
+  border-color: #b9c9dc;
+}
+
+.preview-form .selector-add {
+  justify-self: start;
+}
+
+.preview-form .selector-remove {
+  color: #8b3935;
+}
+
+.preview-submit {
+  justify-self: start;
+}
+
+.field-error {
+  color: #a43b35;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.preview-form input[aria-invalid="true"] {
+  border-color: #b84a43;
+}
+
 .preview-result {
   display: grid;
   gap: 4px;
@@ -155,6 +213,17 @@ main {
   margin-top: 18px;
   color: #27633f;
   font-size: 14px;
+}
+
+.selector-match-list,
+.preview-target-list {
+  margin: 4px 0;
+  padding-left: 22px;
+}
+
+.preview-target-list {
+  color: #344255;
+  white-space: pre-wrap;
 }
 
 .preview-error {
@@ -251,6 +320,14 @@ main {
   }
 
   .preview-form {
+    gap: 14px;
+  }
+
+  .selector-row {
     grid-template-columns: 1fr;
+  }
+
+  .preview-form .selector-remove {
+    justify-self: start;
   }
 }

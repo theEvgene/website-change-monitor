@@ -12,6 +12,7 @@ export const apiErrorCodesV1 = [
   "invalid_request",
   "not_found",
   ...pageProbeErrorCodes,
+  "duplicate_selector",
   "unsupported_selector",
 ] as const;
 export type ApiErrorCodeV1 = (typeof apiErrorCodesV1)[number];
@@ -20,11 +21,27 @@ export interface ApiErrorV1 {
   error: {
     code: ApiErrorCodeV1;
     message: string;
+    field?: "targetSelectors" | "exclusionSelectors";
+    index?: number;
   };
 }
 
-export function apiError(code: ApiErrorCodeV1, message: string): ApiErrorV1 {
-  return { error: { code, message } };
+export function apiError(
+  code: ApiErrorCodeV1,
+  message: string,
+  location?: {
+    field?: "targetSelectors" | "exclusionSelectors";
+    index?: number;
+  },
+): ApiErrorV1 {
+  return {
+    error: {
+      code,
+      message,
+      ...(location?.field === undefined ? {} : { field: location.field }),
+      ...(location?.index === undefined ? {} : { index: location.index }),
+    },
+  };
 }
 
 export const apiErrorSchemaV1 = {
@@ -40,6 +57,11 @@ export const apiErrorSchemaV1 = {
       properties: {
         code: { enum: apiErrorCodesV1, type: "string" },
         message: { type: "string" },
+        field: {
+          enum: ["targetSelectors", "exclusionSelectors"],
+          type: "string",
+        },
+        index: { type: "integer", minimum: 0 },
       },
     },
   },
@@ -91,10 +113,22 @@ export const previewRequestSchemaV1 = {
   $id: "PreviewRequestV1",
   type: "object",
   additionalProperties: false,
-  required: ["url", "targetSelector"],
+  required: ["url", "targetSelectors", "exclusionSelectors"],
   properties: {
     url: { type: "string", minLength: 1 },
-    targetSelector: { type: "string", minLength: 1 },
+    targetSelectors: {
+      type: "array",
+      minItems: 1,
+      description:
+        "Непустой набор стандартных CSS-селекторов light DOM. Значения нормализуются по краям, точные дубли запрещены, и каждый селектор обязан найти совпадение.",
+      items: { type: "string" },
+    },
+    exclusionSelectors: {
+      type: "array",
+      description:
+        "Набор стандартных CSS-селекторов поддеревьев, удаляемых внутри каждого элемента Целевой области; порядок селекторов не влияет на результат.",
+      items: { type: "string" },
+    },
   },
 } as const;
 
@@ -102,11 +136,68 @@ export const previewResponseSchemaV1 = {
   $id: "PreviewResponseV1",
   type: "object",
   additionalProperties: false,
-  required: ["finalUrl", "targetSelector", "matchCount"],
+  required: [
+    "finalUrl",
+    "targetMatches",
+    "exclusionSelectors",
+    "targetCount",
+    "targets",
+  ],
   properties: {
     finalUrl: { type: "string" },
-    targetSelector: { type: "string" },
-    matchCount: { type: "integer", minimum: 1 },
+    targetMatches: {
+      type: "array",
+      minItems: 1,
+      description:
+        "Число совпадений каждого Целевого селектора в порядке полей запроса.",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["selector", "matchCount"],
+        properties: {
+          selector: { type: "string" },
+          matchCount: { type: "integer", minimum: 1 },
+        },
+      },
+    },
+    exclusionSelectors: {
+      type: "array",
+      items: { type: "string" },
+    },
+    targetCount: {
+      type: "integer",
+      minimum: 1,
+      description:
+        "Количество элементов в уникальном объединении Целевых селекторов после устранения дублей по идентичности DOM-узла.",
+    },
+    targets: {
+      type: "array",
+      minItems: 1,
+      description:
+        "Элементы Целевой области в глобальном порядке DOM независимо от порядка Целевых селекторов в запросе.",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["elements", "visibleText"],
+        properties: {
+          elements: {
+            type: "array",
+            minItems: 1,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["namespace", "name", "childElementCount"],
+              properties: {
+                namespace: { type: ["string", "null"] },
+                name: { type: "string" },
+                childElementCount: { type: "integer", minimum: 0 },
+              },
+            },
+          },
+          visibleText: { type: "string" },
+        },
+      },
+    },
   },
 } as const;
 
@@ -135,8 +226,8 @@ export const versionRouteSchema: FastifySchema = {
 };
 
 export const previewRouteSchema: FastifySchema = {
-  operationId: "previewTarget",
-  summary: "Предпросмотреть один Целевой селектор",
+  operationId: "previewObservationScope",
+  summary: "Предпросмотреть Область наблюдения",
   body: { $ref: "PreviewRequestV1#" },
   response: {
     200: { $ref: "PreviewResponseV1#" },

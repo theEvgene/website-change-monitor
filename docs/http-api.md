@@ -18,23 +18,67 @@ Invoke-RestMethod -Uri 'http://127.0.0.1:43117/api/health' | ConvertTo-Json -Com
 curl.exe --fail --silent --show-error http://127.0.0.1:43117/api/version
 ```
 
-Предпросмотреть один Целевой селектор через тот же API:
+Предпросмотреть Область наблюдения из нескольких Целевых селекторов и Селекторов исключения через тот же API:
 
 <!-- verify:powershell-preview -->
 ```powershell
-$body = @{ url = 'https://example.com/catalog'; targetSelector = '.product-card' } | ConvertTo-Json
+$body = @{
+  url = 'https://example.com/catalog'
+  targetSelectors = @('.page-title', '.product-card')
+  exclusionSelectors = @('.price')
+} | ConvertTo-Json
 Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:43117/api/preview' -ContentType 'application/json' -Body $body | ConvertTo-Json -Compress -Depth 8
 ```
 
-Успешный preview возвращает фактически открытый URL после разрешённых redirect, исходный Целевой селектор и число совпавших элементов:
+Успешный preview возвращает фактически открытый URL после разрешённых redirect, число совпадений каждого Целевого селектора, размер уникального объединения и Целевую область в порядке DOM:
 
 ```json
 {
   "finalUrl": "https://example.com/catalog",
-  "targetSelector": ".product-card",
-  "matchCount": 3
+  "targetMatches": [
+    { "selector": ".page-title", "matchCount": 1 },
+    { "selector": ".product-card", "matchCount": 2 }
+  ],
+  "exclusionSelectors": [".price"],
+  "targetCount": 3,
+  "targets": [
+    {
+      "elements": [
+        {
+          "namespace": "http://www.w3.org/1999/xhtml",
+          "name": "div",
+          "childElementCount": 0
+        }
+      ],
+      "visibleText": "Каталог"
+    },
+    {
+      "elements": [
+        {
+          "namespace": "http://www.w3.org/1999/xhtml",
+          "name": "div",
+          "childElementCount": 0
+        }
+      ],
+      "visibleText": "Товар A"
+    },
+    {
+      "elements": [
+        {
+          "namespace": "http://www.w3.org/1999/xhtml",
+          "name": "div",
+          "childElementCount": 0
+        }
+      ],
+      "visibleText": "Товар B"
+    }
+  ]
 }
 ```
+
+`targetSelectors` содержит минимум один уникальный после `trim` стандартный CSS-селектор; `exclusionSelectors` может быть пустым. Каждый Целевой селектор обязан найти хотя бы один элемент. Совпадения объединяются без дублей и сортируются по DOM, поэтому порядок массивов не задаёт порядок результата. Каждый Селектор исключения удаляет совпавшие поддеревья внутри каждого элемента Целевой области из структуры и видимого текста.
+
+Если итоговая Целевая область превышает встроенный бюджет элементов или текста, preview целиком отклоняется с `target_area_too_large` (HTTP 422) без частичного результата. В этом случае сузьте Целевые селекторы или добавьте Селекторы исключения.
 
 Разрешены только публичные абсолютные HTTP(S) URL без встроенных учётных данных и стандартные CSS-селекторы light DOM главного документа. XPath, Playwright-specific selectors, iframe и shadow DOM не поддерживаются. Каждый запрос и redirect проходит проверку адреса; loopback, private, link-local, multicast и служебные диапазоны блокируются.
 

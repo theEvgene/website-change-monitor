@@ -134,7 +134,13 @@ export function buildHttpServer(
       version: options.version,
     }));
 
-    apiServer.post<{ Body: { url: string; targetSelector: string } }>(
+    apiServer.post<{
+      Body: {
+        url: string;
+        targetSelectors: string[];
+        exclusionSelectors: string[];
+      };
+    }>(
       "/api/preview",
       { schema: previewRouteSchema },
       async (request, reply) => {
@@ -145,12 +151,22 @@ export function buildHttpServer(
           );
         } catch (error: unknown) {
           if (error instanceof PreviewInputError) {
-            return reply.code(400).send(apiError(error.code, error.message));
+            return reply.code(400).send(
+              apiError(error.code, error.message, {
+                ...(error.field === undefined ? {} : { field: error.field }),
+                ...(error.index === undefined ? {} : { index: error.index }),
+              }),
+            );
           }
           if (error instanceof PageProbeError) {
             return reply
               .code(pageProbeStatus(error.code))
-              .send(apiError(error.code, error.message));
+              .send(
+                apiError(error.code, error.message, {
+                  ...(error.field === undefined ? {} : { field: error.field }),
+                  ...(error.index === undefined ? {} : { index: error.index }),
+                }),
+              );
           }
           throw error;
         }
@@ -203,6 +219,7 @@ function pageProbeStatus(code: PageProbeError["code"]): 400 | 422 | 502 | 504 {
   if (
     code === "target_not_found" ||
     code === "target_not_visible" ||
+    code === "target_area_too_large" ||
     code === "target_disappeared" ||
     code === "content_unstable"
   ) {

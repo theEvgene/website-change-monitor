@@ -8,7 +8,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import { buildHttpServer } from "../src/server/http/server.js";
 import { startApplication } from "../src/server/operations/start.js";
-import { successfulPageProbeResult } from "./support/page-probe.js";
+import {
+  simplePagePreviewTargets,
+  successfulPageProbeResult,
+} from "./support/page-probe.js";
 import { PortInUseError } from "../src/server/operations/start.js";
 import { openApplicationDatabase } from "../src/server/persistence/database.js";
 
@@ -58,7 +61,11 @@ describe("application start", () => {
     const preview = vi
       .fn()
       .mockResolvedValue(
-        successfulPageProbeResult("https://example.com/final", 2),
+        successfulPageProbeResult(
+          "https://example.com/final",
+          [{ selector: ".target", matchCount: 2 }],
+          simplePagePreviewTargets("Первый", "Второй"),
+        ),
       );
     const closePageProbe = vi.fn().mockResolvedValue(undefined);
     let outcome: Awaited<ReturnType<typeof startApplication>> | undefined;
@@ -81,12 +88,13 @@ describe("application start", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           url: "https://example.com/start",
-          targetSelector: ".target",
+          targetSelectors: [".target"],
+          exclusionSelectors: [],
         }),
       });
 
       expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toMatchObject({ matchCount: 2 });
+      await expect(response.json()).resolves.toMatchObject({ targetCount: 2 });
       expect(preview).toHaveBeenCalledOnce();
     } finally {
       if (outcome?.kind === "started") {

@@ -27,6 +27,61 @@ describe("Playwright PageProbe", () => {
           </script>`);
         return;
       }
+      if (request.url === "/scope") {
+        response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        response.end(`<!doctype html>
+          <main>
+            <h1 class="summary">Каталог</h1>
+            <article class="card">
+              <h2 class="item-title also-title">Товар A</h2>
+              <p class="item-subtitle">Описание A <span class="noise"><span class="nested-noise">Цена A</span></span></p>
+              <span class="hidden-note" hidden>Скрыто A</span>
+            </article>
+            <article class="card">
+              <h2 class="item-title also-title">Товар B</h2>
+              <p class="item-subtitle">Описание B <span class="noise"><span class="nested-noise">Цена B</span></span></p>
+              <span class="hidden-note" hidden>Скрыто B</span>
+            </article>
+            <footer class="footer">Подвал</footer>
+          </main>`);
+        return;
+      }
+      if (request.url === "/budget") {
+        response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        response.end(`<!doctype html>
+          <main>
+            <div class="target">AAAA<span class="target">nested</span></div>
+            <article class="target">BBBB</article>
+          </main>`);
+        return;
+      }
+      if (request.url === "/disappearing") {
+        response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        response.end(`<div class="target">Временная цель</div><script>
+          setTimeout(() => document.querySelector('.target')?.remove(), 40);
+        </script>`);
+        return;
+      }
+      if (request.url === "/excluded-noise") {
+        response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        response.end(`<div class="target">Стабильно <span class="noise">0</span></div><script>
+          let value = 0;
+          setInterval(() => {
+            document.querySelector('.noise').textContent = String(++value);
+          }, 5);
+        </script>`);
+        return;
+      }
+      if (request.url === "/unstable") {
+        response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        response.end(`<div class="target">0</div><script>
+          let value = 0;
+          setInterval(() => {
+            document.querySelector('.target').textContent = String(++value);
+          }, 5);
+        </script>`);
+        return;
+      }
       if (request.url === "/redirect-private") {
         const address = fixture.address() as AddressInfo;
         response.writeHead(302, {
@@ -127,14 +182,16 @@ describe("Playwright PageProbe", () => {
     await expect(
       probe.preview({
         url: `${fixtureUrl}/dynamic`,
-        targetSelector: ".target",
+        targetSelectors: [".target"],
+        exclusionSelectors: [],
       }),
     ).resolves.toMatchObject({
       ok: true,
       preview: {
         finalUrl: `${fixtureUrl}/dynamic`,
         httpStatus: 200,
-        matchCount: 3,
+        targetMatches: [{ selector: ".target", matchCount: 3 }],
+        targetCount: 3,
         timings: {
           totalMs: expect.any(Number),
           navigationMs: expect.any(Number),
@@ -147,6 +204,299 @@ describe("Playwright PageProbe", () => {
     });
   });
 
+  it("combines multiple selectors without duplicates in document order", async () => {
+    const probe = createPlaywrightPageProbe(browser, {
+      networkAccess: fixtureNetworkAccess(),
+      timings: fastTimings(),
+    });
+
+    await expect(
+      probe.preview({
+        url: `${fixtureUrl}/scope`,
+        targetSelectors: [
+          ".footer",
+          ".item-title",
+          ".item-subtitle",
+          ".summary",
+          ".also-title",
+        ],
+        exclusionSelectors: [],
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      preview: {
+        targetMatches: [
+          { selector: ".footer", matchCount: 1 },
+          { selector: ".item-title", matchCount: 2 },
+          { selector: ".item-subtitle", matchCount: 2 },
+          { selector: ".summary", matchCount: 1 },
+          { selector: ".also-title", matchCount: 2 },
+        ],
+        targetCount: 6,
+        targets: [
+          { visibleText: "Каталог" },
+          { visibleText: "Товар A" },
+          { visibleText: "Описание A Цена A" },
+          { visibleText: "Товар B" },
+          { visibleText: "Описание B Цена B" },
+          { visibleText: "Подвал" },
+        ],
+      },
+    });
+  });
+
+  it("removes nested exclusion subtrees from structure and rendered text", async () => {
+    const probe = createPlaywrightPageProbe(browser, {
+      networkAccess: fixtureNetworkAccess(),
+      timings: fastTimings(),
+    });
+    const input = {
+      url: `${fixtureUrl}/scope`,
+      targetSelectors: [".card"],
+      exclusionSelectors: [".nested-noise", ".noise"],
+    };
+
+    const first = await probe.preview(input);
+    const reordered = await probe.preview({
+      ...input,
+      exclusionSelectors: [".noise", ".nested-noise"],
+    });
+
+    expect(first).toMatchObject({
+      ok: true,
+      preview: {
+        targetCount: 2,
+        targets: [
+          {
+            elements: [
+              { name: "article", childElementCount: 3 },
+              { name: "h2", childElementCount: 0 },
+              { name: "p", childElementCount: 0 },
+              { name: "span", childElementCount: 0 },
+            ],
+            visibleText: "Товар A\n\nОписание A",
+          },
+          {
+            elements: [
+              { name: "article", childElementCount: 3 },
+              { name: "h2", childElementCount: 0 },
+              { name: "p", childElementCount: 0 },
+              { name: "span", childElementCount: 0 },
+            ],
+            visibleText: "Товар B\n\nОписание B",
+          },
+        ],
+      },
+    });
+    expect(reordered).toMatchObject(
+      first.ok ? { ok: true, preview: { targets: first.preview.targets } } : {},
+    );
+  });
+
+  it("identifies the target selector that has no matches", async () => {
+    const probe = createPlaywrightPageProbe(browser, {
+      networkAccess: fixtureNetworkAccess(),
+      timings: fastTimings(),
+    });
+
+    await expect(
+      probe.preview({
+        url: `${fixtureUrl}/scope`,
+        targetSelectors: [".item-title", ".missing"],
+        exclusionSelectors: [],
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      code: "target_not_found",
+      field: "targetSelectors",
+      index: 1,
+    });
+  });
+
+  it("identifies the first target field when the whole target area is absent", async () => {
+    const probe = createPlaywrightPageProbe(browser, {
+      networkAccess: fixtureNetworkAccess(),
+      timings: fastTimings(),
+    });
+
+    await expect(
+      probe.preview({
+        url: `${fixtureUrl}/scope`,
+        targetSelectors: [".missing-first", ".missing-second"],
+        exclusionSelectors: [],
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      code: "target_not_found",
+      field: "targetSelectors",
+      index: 0,
+    });
+  });
+
+  it("keeps distinct nested Target area elements in document order", async () => {
+    const probe = createPlaywrightPageProbe(browser, {
+      networkAccess: fixtureNetworkAccess(),
+      timings: fastTimings(),
+    });
+
+    await expect(
+      probe.preview({
+        url: `${fixtureUrl}/scope`,
+        targetSelectors: [".item-title", ".card"],
+        exclusionSelectors: [],
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      preview: {
+        targetCount: 4,
+        targets: [
+          { visibleText: expect.stringContaining("Товар A") },
+          { visibleText: "Товар A" },
+          { visibleText: expect.stringContaining("Товар B") },
+          { visibleText: "Товар B" },
+        ],
+      },
+    });
+  });
+
+  it.each([
+    [
+      "target count",
+      {
+        maxTargets: 2,
+        maxElementRecords: 4,
+        maxVisibleTextCharacters: 20,
+      },
+    ],
+    [
+      "element records",
+      {
+        maxTargets: 3,
+        maxElementRecords: 3,
+        maxVisibleTextCharacters: 20,
+      },
+    ],
+    [
+      "visible text",
+      {
+        maxTargets: 3,
+        maxElementRecords: 4,
+        maxVisibleTextCharacters: 19,
+      },
+    ],
+  ])("rejects a Target area over the %s budget", async (_name, limits) => {
+    const probe = createPlaywrightPageProbe(browser, {
+      networkAccess: fixtureNetworkAccess(),
+      timings: fastTimings(),
+      limits,
+    });
+
+    await expect(
+      probe.preview({
+        url: `${fixtureUrl}/budget`,
+        targetSelectors: [".target"],
+        exclusionSelectors: [],
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      code: "target_area_too_large",
+      stage: "extraction",
+    });
+    expect(browser.contexts()).toHaveLength(0);
+
+    await expect(
+      probe.preview({
+        url: `${fixtureUrl}/budget`,
+        targetSelectors: ["article"],
+        exclusionSelectors: [],
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      preview: { targetCount: 1 },
+    });
+  });
+
+  it("accepts a Target area exactly at every extraction budget", async () => {
+    const probe = createPlaywrightPageProbe(browser, {
+      networkAccess: fixtureNetworkAccess(),
+      timings: fastTimings(),
+      limits: {
+        maxTargets: 3,
+        maxElementRecords: 4,
+        maxVisibleTextCharacters: 20,
+      },
+    });
+
+    await expect(
+      probe.preview({
+        url: `${fixtureUrl}/budget`,
+        targetSelectors: [".target"],
+        exclusionSelectors: [],
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      preview: {
+        targetCount: 3,
+        targets: [
+          { visibleText: "AAAAnested" },
+          { visibleText: "nested" },
+          { visibleText: "BBBB" },
+        ],
+      },
+    });
+  });
+
+  it("rejects a target area that disappears before atomic extraction", async () => {
+    const probe = createPlaywrightPageProbe(browser, {
+      networkAccess: fixtureNetworkAccess(),
+      timings: fastTimings(),
+    });
+
+    await expect(
+      probe.preview({
+        url: `${fixtureUrl}/disappearing`,
+        targetSelectors: [".target"],
+        exclusionSelectors: [],
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      code: "target_disappeared",
+    });
+  });
+
+  it("ignores mutations inside excluded subtrees during the quiet window", async () => {
+    const probe = createPlaywrightPageProbe(browser, {
+      networkAccess: fixtureNetworkAccess(),
+      timings: fastTimings(),
+    });
+
+    await expect(
+      probe.preview({
+        url: `${fixtureUrl}/excluded-noise`,
+        targetSelectors: [".target"],
+        exclusionSelectors: [".noise"],
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      preview: { targets: [{ visibleText: "Стабильно" }] },
+    });
+  });
+
+  it("rejects an included Target area element that never reaches the quiet window", async () => {
+    const probe = createPlaywrightPageProbe(browser, {
+      networkAccess: fixtureNetworkAccess(),
+      timings: { ...fastTimings(), stabilityMs: 100 },
+    });
+
+    await expect(
+      probe.preview({
+        url: `${fixtureUrl}/unstable`,
+        targetSelectors: [".target"],
+        exclusionSelectors: [],
+      }),
+    ).resolves.toMatchObject({ ok: false, code: "content_unstable" });
+  });
+
   it("blocks a literal loopback address before Chromium connects", async () => {
     const address = fixture.address() as AddressInfo;
     const probe = createPlaywrightPageProbe(browser, {
@@ -157,7 +507,8 @@ describe("Playwright PageProbe", () => {
     await expect(
       probe.preview({
         url: `http://127.0.0.1:${address.port}/dynamic`,
-        targetSelector: ".target",
+        targetSelectors: [".target"],
+        exclusionSelectors: [],
       }),
     ).resolves.toMatchObject({ ok: false, code: "address_blocked" });
   });
@@ -171,7 +522,8 @@ describe("Playwright PageProbe", () => {
     await expect(
       probe.preview({
         url: `${fixtureUrl}/redirect-private`,
-        targetSelector: ".target",
+        targetSelectors: [".target"],
+        exclusionSelectors: [],
       }),
     ).resolves.toMatchObject({ ok: false, code: "address_blocked" });
   });
@@ -185,7 +537,8 @@ describe("Playwright PageProbe", () => {
     await expect(
       probe.preview({
         url: `${fixtureUrl}/late-block`,
-        targetSelector: ".target",
+        targetSelectors: [".target"],
+        exclusionSelectors: [],
       }),
     ).resolves.toMatchObject({
       ok: false,
@@ -215,7 +568,8 @@ describe("Playwright PageProbe", () => {
       await expect(
         probe.preview({
           url: `${fixtureUrl}/webrtc?port=${address.port}`,
-          targetSelector: ".target",
+          targetSelectors: [".target"],
+          exclusionSelectors: [],
         }),
       ).resolves.toMatchObject({ ok: true });
       await new Promise((resolve) => setTimeout(resolve, 250));
@@ -233,15 +587,16 @@ describe("Playwright PageProbe", () => {
 
     const input = {
       url: `${fixtureUrl}/isolated`,
-      targetSelector: ".target",
+      targetSelectors: [".target"],
+      exclusionSelectors: [],
     };
     await expect(probe.preview(input)).resolves.toMatchObject({
       ok: true,
-      preview: { matchCount: 1 },
+      preview: { targetCount: 1 },
     });
     await expect(probe.preview(input)).resolves.toMatchObject({
       ok: true,
-      preview: { matchCount: 1 },
+      preview: { targetCount: 1 },
     });
   });
 
@@ -254,13 +609,15 @@ describe("Playwright PageProbe", () => {
     await expect(
       probe.preview({
         url: `${fixtureUrl}/encapsulated`,
-        targetSelector: ".target",
+        targetSelectors: [".target"],
+        exclusionSelectors: [],
       }),
     ).resolves.toMatchObject({ ok: false, code: "target_not_found" });
     await expect(
       probe.preview({
         url: `${fixtureUrl}/dynamic`,
-        targetSelector: "div[",
+        targetSelectors: ["div["],
+        exclusionSelectors: [],
       }),
     ).resolves.toMatchObject({ ok: false, code: "invalid_selector" });
   });
@@ -274,7 +631,8 @@ describe("Playwright PageProbe", () => {
     await expect(
       probe.preview({
         url: `${fixtureUrl}/download`,
-        targetSelector: ".target",
+        targetSelectors: [".target"],
+        exclusionSelectors: [],
       }),
     ).resolves.toMatchObject({ ok: false, code: "unsupported_content" });
   });
@@ -288,7 +646,8 @@ describe("Playwright PageProbe", () => {
     await expect(
       probe.preview({
         url: `${fixtureUrl}/slow`,
-        targetSelector: ".target",
+        targetSelectors: [".target"],
+        exclusionSelectors: [],
       }),
     ).resolves.toMatchObject({ ok: false, code: "navigation_timeout" });
     expect(browser.contexts()).toHaveLength(0);
@@ -306,7 +665,8 @@ describe("Playwright PageProbe", () => {
     await expect(
       probe.preview({
         url: `${fixtureUrl}/dynamic`,
-        targetSelector: ".target",
+        targetSelectors: [".target"],
+        exclusionSelectors: [],
       }),
     ).resolves.toMatchObject({
       ok: false,

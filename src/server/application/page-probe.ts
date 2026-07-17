@@ -11,6 +11,7 @@ export const pageProbeErrorCodes = [
   "navigation_failed",
   "navigation_timeout",
   "scroll_failed",
+  "target_area_too_large",
   "target_disappeared",
   "target_not_found",
   "target_not_visible",
@@ -21,7 +22,8 @@ export type PageProbeErrorCode = (typeof pageProbeErrorCodes)[number];
 
 export interface PagePreviewInput {
   url: string;
-  targetSelector: string;
+  targetSelectors: string[];
+  exclusionSelectors: string[];
 }
 
 export type PageProbeStage =
@@ -52,8 +54,30 @@ export interface PageProbeDiagnostics {
 export interface PagePreview {
   finalUrl: string;
   httpStatus: number;
-  matchCount: number;
+  targetMatches: PagePreviewSelectorMatch[];
+  targetCount: number;
+  targets: PagePreviewTarget[];
   timings: PageProbeObservedTimings;
+}
+
+export type PageProbeSelectorField =
+  | "targetSelectors"
+  | "exclusionSelectors";
+
+export interface PagePreviewSelectorMatch {
+  selector: string;
+  matchCount: number;
+}
+
+export interface PagePreviewElement {
+  namespace: string | null;
+  name: string;
+  childElementCount: number;
+}
+
+export interface PagePreviewTarget {
+  elements: PagePreviewElement[];
+  visibleText: string;
 }
 
 export interface PageProbeSuccess {
@@ -65,6 +89,8 @@ export interface PageProbeFailure extends PageProbeDiagnostics {
   ok: false;
   code: PageProbeErrorCode;
   message: string;
+  field?: PageProbeSelectorField;
+  index?: number;
 }
 
 export type PageProbeResult = PageProbeSuccess | PageProbeFailure;
@@ -79,6 +105,8 @@ export class PageProbeError extends Error {
   readonly finalUrl?: string | undefined;
   readonly httpStatus?: number | undefined;
   readonly timings: PageProbeObservedTimings;
+  readonly field: PageProbeSelectorField | undefined;
+  readonly index: number | undefined;
 
   constructor(failure: PageProbeFailure) {
     super(failure.message);
@@ -88,5 +116,7 @@ export class PageProbeError extends Error {
     this.finalUrl = failure.finalUrl;
     this.httpStatus = failure.httpStatus;
     this.timings = failure.timings;
+    this.field = failure.field;
+    this.index = failure.index;
   }
 }

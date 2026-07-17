@@ -35,9 +35,16 @@ export interface PageProbeTimings {
   extractionMs: number;
 }
 
+export interface PageProbeResourceLimits {
+  maxTargets: number;
+  maxElementRecords: number;
+  maxVisibleTextCharacters: number;
+}
+
 export interface PlaywrightPageProbeOptions {
   networkAccess: NetworkAccess;
   timings?: Partial<PageProbeTimings>;
+  limits?: Partial<PageProbeResourceLimits>;
 }
 
 export interface PageProbeRuntime {
@@ -56,11 +63,18 @@ const productionTimings: PageProbeTimings = {
   extractionMs: 5_000,
 };
 
+const productionResourceLimits: PageProbeResourceLimits = {
+  maxTargets: 500,
+  maxElementRecords: 20_000,
+  maxVisibleTextCharacters: 1_000_000,
+};
+
 export function createPlaywrightPageProbe(
   browser: Browser,
   options: PlaywrightPageProbeOptions,
 ): PageProbe {
   const timings = { ...productionTimings, ...options.timings };
+  const limits = { ...productionResourceLimits, ...options.limits };
 
   return {
     async preview(input) {
@@ -72,6 +86,7 @@ export function createPlaywrightPageProbe(
             browser,
             options.networkAccess,
             timings,
+            limits,
             input,
           ),
         };
@@ -84,6 +99,8 @@ export function createPlaywrightPageProbe(
             ok: false,
             code: error.code,
             message: error.message,
+            ...(error.field === undefined ? {} : { field: error.field }),
+            ...(error.index === undefined ? {} : { index: error.index }),
             ...error.diagnostics,
           };
         }
@@ -116,6 +133,7 @@ async function runPreview(
   browser: Browser,
   networkAccess: NetworkAccess,
   timings: PageProbeTimings,
+  limits: PageProbeResourceLimits,
   input: PagePreviewInput,
 ) {
   let context: BrowserContext | undefined;
@@ -171,7 +189,7 @@ async function runPreview(
     });
 
     stage = "validation";
-    await validateNativeSelector(page, input.targetSelector);
+    await validateNativeSelectors(page, input);
 
     let response;
     stage = "navigation";
@@ -230,22 +248,22 @@ async function runPreview(
 
     stage = "target";
     await timed("targetMs", () =>
-      waitForVisibleTarget(page!, input.targetSelector, timings.targetMs),
+      waitForVisibleTarget(page!, input.targetSelectors, timings.targetMs),
     );
     stage = "scroll";
     await timed("scrollMs", () =>
-      scrollToFirstVisibleTarget(page!, input.targetSelector, timings.scrollMs),
+      scrollToFirstVisibleTarget(page!, input.targetSelectors, timings.scrollMs),
     );
     stage = "stability";
     await timed("stabilityMs", async () => {
       if (timings.settleDelayMs > 0) {
         await page!.waitForTimeout(timings.settleDelayMs);
       }
-      await waitForStableTargets(page!, input.targetSelector, timings);
+      await waitForStableTargets(page!, input, timings);
     });
     stage = "extraction";
-    const matchCount = await timed("extractionMs", () =>
-      extractMatchCount(page!, input.targetSelector, timings.extractionMs),
+    const extracted = await timed("extractionMs", () =>
+      extractObservationScope(page!, input, timings.extractionMs, limits),
     );
     if (blockedError instanceof PageProbeAbort) {
       throw blockedError;
@@ -254,7 +272,7 @@ async function runPreview(
     return {
       finalUrl: page.url(),
       httpStatus,
-      matchCount,
+      ...extracted,
       timings: finishObservedTimings(observedTimings, previewStarted),
     };
   } catch (error: unknown) {
@@ -300,28 +318,60 @@ async function disableWebRtc(context: BrowserContext): Promise<void> {
   });
 }
 
-async function validateNativeSelector(page: Page, selector: string) {
-  try {
-    await page.evaluate(
-      (value) => document.querySelectorAll(value).length,
-      selector,
-    );
-  } catch {
+async function validateNativeSelectors(page: Page, input: PagePreviewInput) {
+  const invalid = await page.evaluate(
+    ({ targetSelectors, exclusionSelectors }) => {
+      for (const [index, selector] of targetSelectors.entries()) {
+        try {
+          document.querySelectorAll(selector);
+        } catch {
+          return { field: "targetSelectors" as const, index };
+        }
+      }
+      for (const [index, selector] of exclusionSelectors.entries()) {
+        try {
+          document.querySelectorAll(selector);
+        } catch {
+          return { field: "exclusionSelectors" as const, index };
+        }
+      }
+      return undefined;
+    },
+    input,
+  );
+  if (invalid !== undefined) {
     throw pageError(
       "invalid_selector",
-      "Целевой CSS-селектор имеет неверный синтаксис.",
+      invalid.field === "targetSelectors"
+        ? `Целевой CSS-селектор ${invalid.index + 1} имеет неверный синтаксис.`
+        : `CSS-селектор исключения ${invalid.index + 1} имеет неверный синтаксис.`,
+      invalid,
     );
   }
 }
 
 function visitFirstVisibleTarget({
-  selector,
+  selectors,
   scroll,
 }: {
-  selector: string;
+  selectors: string[];
   scroll: boolean;
 }): boolean {
-  const element = [...document.querySelectorAll(selector)].find((candidate) => {
+  const matches = new Set<Element>();
+  for (const selector of selectors) {
+    for (const element of document.querySelectorAll(selector)) {
+      matches.add(element);
+    }
+  }
+  const ordered = [...matches].sort((left, right) => {
+    if (left === right) {
+      return 0;
+    }
+    return left.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_PRECEDING
+      ? 1
+      : -1;
+  });
+  const element = ordered.find((candidate) => {
     const style = getComputedStyle(candidate);
     const box = candidate.getBoundingClientRect();
     return (
@@ -342,41 +392,57 @@ function visitFirstVisibleTarget({
 
 async function waitForVisibleTarget(
   page: Page,
-  selector: string,
+  selectors: string[],
   timeout: number,
 ) {
   try {
     await page.waitForFunction(
       visitFirstVisibleTarget,
-      { selector, scroll: false },
+      { selectors, scroll: false },
       { timeout },
     );
   } catch (error: unknown) {
     if (!(error instanceof errors.TimeoutError)) {
       throw error;
     }
-    const count = await page.evaluate(
-      (value) => document.querySelectorAll(value).length,
-      selector,
-    );
+    const result = await page.evaluate((values) => {
+      const matches = new Set<Element>();
+      const matchCounts = values.map((selector) => {
+        const selectorMatches = document.querySelectorAll(selector);
+        for (const element of selectorMatches) {
+          matches.add(element);
+        }
+        return selectorMatches.length;
+      });
+      return { matchCounts, targetCount: matches.size };
+    }, selectors);
     throw pageError(
-      count === 0 ? "target_not_found" : "target_not_visible",
-      count === 0
+      result.targetCount === 0 ? "target_not_found" : "target_not_visible",
+      result.targetCount === 0
         ? "Целевой селектор не нашёл элементов."
         : "Найденные элементы не отображаются на странице.",
+      result.targetCount === 0
+        ? {
+            field: "targetSelectors",
+            index: Math.max(
+              0,
+              result.matchCounts.findIndex((count) => count === 0),
+            ),
+          }
+        : undefined,
     );
   }
 }
 
 async function scrollToFirstVisibleTarget(
   page: Page,
-  selector: string,
+  selectors: string[],
   timeout: number,
 ) {
   try {
     await Promise.race([
       page
-        .evaluate(visitFirstVisibleTarget, { selector, scroll: true })
+        .evaluate(visitFirstVisibleTarget, { selectors, scroll: true })
         .then((found) => {
           if (!found) {
             throw new Error("Visible target disappeared");
@@ -391,17 +457,17 @@ async function scrollToFirstVisibleTarget(
 
 async function waitForStableTargets(
   page: Page,
-  selector: string,
+  input: PagePreviewInput,
   timings: Pick<PageProbeTimings, "quietWindowMs" | "stabilityMs">,
 ) {
   const stable = await page.evaluate(
-    ({ selector: value, quietWindowMs, stabilityMs }) =>
+    ({ targetSelectors, exclusionSelectors, quietWindowMs, stabilityMs }) =>
       new Promise<boolean>((resolve) => {
-        let signature = targetSignature(value);
+        let signature = targetSignature();
         let quietTimer = window.setTimeout(done, quietWindowMs);
         const stopTimer = window.setTimeout(() => done(false), stabilityMs);
         const observer = new MutationObserver(() => {
-          const next = targetSignature(value);
+          const next = targetSignature();
           if (next === signature) {
             return;
           }
@@ -416,10 +482,74 @@ async function waitForStableTargets(
           subtree: true,
         });
 
-        function targetSignature(targetSelector: string) {
-          return [...document.querySelectorAll(targetSelector)]
-            .map((element) => element.outerHTML)
-            .join("\u0000");
+        function targetSignature() {
+          const matchCounts = targetSelectors.map(
+            (selector) => document.querySelectorAll(selector).length,
+          );
+          const targetSet = new Set<Element>();
+          for (const selector of targetSelectors) {
+            for (const element of document.querySelectorAll(selector)) {
+              targetSet.add(element);
+            }
+          }
+          const targets = [...targetSet].sort((left, right) => {
+            if (left === right) {
+              return 0;
+            }
+            return left.compareDocumentPosition(right) &
+              Node.DOCUMENT_POSITION_PRECEDING
+              ? 1
+              : -1;
+          });
+          const projections = targets.map((target) => {
+            const excluded = exclusionBoundaries(target);
+            const entries: string[] = [];
+            visit(target, target, excluded, entries);
+            return entries;
+          });
+          return JSON.stringify([matchCounts, projections]);
+        }
+
+        function exclusionBoundaries(target: Element): Set<Element> {
+          const matches = new Set<Element>();
+          for (const selector of exclusionSelectors) {
+            for (const element of target.querySelectorAll(selector)) {
+              matches.add(element);
+            }
+          }
+          return new Set(
+            [...matches].filter(
+              (candidate) =>
+                ![...matches].some(
+                  (other) => other !== candidate && other.contains(candidate),
+                ),
+            ),
+          );
+        }
+
+        function visit(
+          node: Node,
+          root: Element,
+          excluded: Set<Element>,
+          entries: string[],
+        ) {
+          if (node instanceof Element) {
+            if (node !== root && excluded.has(node)) {
+              return;
+            }
+            const attributes = node
+              .getAttributeNames()
+              .sort()
+              .map((name) => [name, node.getAttribute(name)]);
+            entries.push(
+              JSON.stringify([node.namespaceURI, node.localName, attributes]),
+            );
+          } else if (node instanceof Text) {
+            entries.push(JSON.stringify(["text", node.data]));
+          }
+          for (const child of node.childNodes) {
+            visit(child, root, excluded, entries);
+          }
         }
 
         function done(result = true) {
@@ -430,7 +560,8 @@ async function waitForStableTargets(
         }
       }),
     {
-      selector,
+      targetSelectors: input.targetSelectors,
+      exclusionSelectors: input.exclusionSelectors,
       quietWindowMs: timings.quietWindowMs,
       stabilityMs: timings.stabilityMs,
     },
@@ -443,26 +574,187 @@ async function waitForStableTargets(
   }
 }
 
-async function extractMatchCount(
+async function extractObservationScope(
   page: Page,
-  selector: string,
+  input: PagePreviewInput,
   timeout: number,
+  limits: PageProbeResourceLimits,
 ) {
   try {
-    const count = await Promise.race([
-      page.evaluate(
-        (value) => document.querySelectorAll(value).length,
-        selector,
-      ),
+    const extracted = await Promise.race([
+      page.evaluate(({ targetSelectors, exclusionSelectors, limits }) => {
+        const targetMatches = targetSelectors.map((selector) => ({
+          selector,
+          matchCount: document.querySelectorAll(selector).length,
+        }));
+        const targetSet = new Set<Element>();
+        for (const selector of targetSelectors) {
+          for (const element of document.querySelectorAll(selector)) {
+            targetSet.add(element);
+          }
+        }
+        const targets = [...targetSet].sort((left, right) => {
+          if (left === right) {
+            return 0;
+          }
+          return left.compareDocumentPosition(right) &
+            Node.DOCUMENT_POSITION_PRECEDING
+            ? 1
+            : -1;
+        });
+
+        if (targets.length > limits.maxTargets) {
+          return { status: "too_large" as const, reason: "targets" as const };
+        }
+
+        let elementRecordCount = 0;
+        let visibleTextCharacterCount = 0;
+        const extractedTargets: Array<{
+          elements: Array<{
+            namespace: string | null;
+            name: string;
+            childElementCount: number;
+          }>;
+          visibleText: string;
+        }> = [];
+        for (const target of targets) {
+          const targetResult = extractTarget(target);
+          if (typeof targetResult === "string") {
+            return { status: "too_large" as const, reason: targetResult };
+          }
+          extractedTargets.push(targetResult);
+        }
+
+        return {
+          status: "ok" as const,
+          targetMatches,
+          targetCount: targets.length,
+          targets: extractedTargets,
+        };
+
+        function extractTarget(target: Element) {
+          const excluded = exclusionBoundaries(target);
+          const displays = [...excluded].map((element) => ({
+            element: element as HTMLElement,
+            value: (element as HTMLElement).style.getPropertyValue("display"),
+            priority: (element as HTMLElement).style.getPropertyPriority(
+              "display",
+            ),
+          }));
+          for (const { element } of displays) {
+            element.style.setProperty("display", "none", "important");
+          }
+          try {
+            const style = getComputedStyle(target);
+            const box = target.getBoundingClientRect();
+            const rendered =
+              style.display !== "none" &&
+              style.visibility !== "hidden" &&
+              box.width > 0 &&
+              box.height > 0;
+            const visibleText =
+              rendered && target instanceof HTMLElement ? target.innerText : "";
+            visibleTextCharacterCount += visibleText.length;
+            if (
+              visibleTextCharacterCount > limits.maxVisibleTextCharacters
+            ) {
+              return "visible_text" as const;
+            }
+            const elements: Array<{
+              namespace: string | null;
+              name: string;
+              childElementCount: number;
+            }> = [];
+            if (!visitElement(target, target, excluded, elements)) {
+              return "elements" as const;
+            }
+            return { elements, visibleText };
+          } finally {
+            for (const { element, value, priority } of displays) {
+              if (value === "") {
+                element.style.removeProperty("display");
+              } else {
+                element.style.setProperty("display", value, priority);
+              }
+            }
+          }
+        }
+
+        function exclusionBoundaries(target: Element): Set<Element> {
+          const matches = new Set<Element>();
+          for (const selector of exclusionSelectors) {
+            for (const element of target.querySelectorAll(selector)) {
+              matches.add(element);
+            }
+          }
+          return new Set(
+            [...matches].filter(
+              (candidate) =>
+                ![...matches].some(
+                  (other) => other !== candidate && other.contains(candidate),
+                ),
+            ),
+          );
+        }
+
+        function visitElement(
+          element: Element,
+          root: Element,
+          excluded: Set<Element>,
+          result: Array<{
+            namespace: string | null;
+            name: string;
+            childElementCount: number;
+          }>,
+        ): boolean {
+          if (element !== root && excluded.has(element)) {
+            return true;
+          }
+          elementRecordCount += 1;
+          if (elementRecordCount > limits.maxElementRecords) {
+            return false;
+          }
+          const children = [...element.children].filter(
+            (child) => !excluded.has(child),
+          );
+          result.push({
+            namespace: element.namespaceURI,
+            name: element.localName,
+            childElementCount: children.length,
+          });
+          for (const child of children) {
+            if (!visitElement(child, root, excluded, result)) {
+              return false;
+            }
+          }
+          return true;
+        }
+      }, { ...input, limits }),
       rejectAfter(timeout),
     ]);
-    if (count === 0) {
+    if (extracted.status === "too_large") {
+      throw pageError(
+        "target_area_too_large",
+        "Целевая область слишком велика. Сузьте Целевые селекторы или добавьте Селекторы исключения.",
+      );
+    }
+    if (extracted.targetCount === 0) {
       throw pageError(
         "target_disappeared",
         "Целевые элементы исчезли до извлечения.",
       );
     }
-    return count;
+    const missing = extracted.targetMatches.findIndex(
+      ({ matchCount }) => matchCount === 0,
+    );
+    if (missing >= 0) {
+      throw pageError(
+        "target_not_found",
+        `Целевой селектор ${missing + 1} не нашёл элементов.`,
+        { field: "targetSelectors", index: missing },
+      );
+    }
+    return extracted;
   } catch (error: unknown) {
     if (error instanceof PageProbeAbort) {
       throw error;
@@ -481,8 +773,21 @@ function stageTimeout(stage: number, deadline: number): number {
   return Math.max(1, Math.min(stage, deadline));
 }
 
-function pageError(code: PageProbeErrorCode, message: string) {
-  return new PageProbeAbort(code, message);
+function pageError(
+  code: PageProbeErrorCode,
+  message: string,
+  location?: {
+    field: "targetSelectors" | "exclusionSelectors";
+    index: number;
+  },
+) {
+  return new PageProbeAbort(
+    code,
+    message,
+    undefined,
+    location?.field,
+    location?.index,
+  );
 }
 
 function emptyObservedTimings(): PageProbeObservedTimings {
@@ -507,7 +812,13 @@ function diagnosePageError(
   error: PageProbeAbort,
   diagnostics: PageProbeDiagnostics,
 ): PageProbeAbort {
-  return new PageProbeAbort(error.code, error.message, diagnostics);
+  return new PageProbeAbort(
+    error.code,
+    error.message,
+    diagnostics,
+    error.field,
+    error.index,
+  );
 }
 
 function effectiveUrl(page: Page | undefined, fallback: string): string {

@@ -17,6 +17,7 @@ interface MonitorSummary {
   latestCheckResult: "baseline" | "no_change" | "change" | "error" | null;
   activeIntent: ActiveIntent | null;
   paused: boolean;
+  labels: string[];
 }
 
 interface ActiveIntent {
@@ -52,10 +53,14 @@ export function MonitorsWorkspace({ refreshToken }: { refreshToken: number }) {
   const [pauseBusy, setPauseBusy] = useState(false);
   const [pauseError, setPauseError] = useState<string | null>(null);
   const [comparison, setComparison] = useState<ComparisonResponse | null>(null);
+  const [labelFilter, setLabelFilter] = useState("");
+  const [availableLabels, setAvailableLabels] = useState<string[]>([]);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [operationNotice, setOperationNotice] = useState<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
-    void fetch("/api/monitors", {
+    void fetch(`/api/monitors${labelFilter === "" ? "" : `?label=${encodeURIComponent(labelFilter)}`}`, {
       headers: { accept: "application/json" },
       signal: controller.signal,
     })
@@ -66,6 +71,7 @@ export function MonitorsWorkspace({ refreshToken }: { refreshToken: number }) {
       })
       .then((items) => {
         setMonitors(items);
+        if (labelFilter === "") setAvailableLabels([...new Set(items.flatMap((item) => item.labels ?? []))].sort((left, right) => left.localeCompare(right, "ru")));
         const selectedId = items.find((item) => item.id === selected?.id)?.id ?? items[0]?.id;
         if (selectedId === undefined) setSelected(null);
         else void loadMonitor(selectedId, controller.signal, setSelected);
@@ -77,11 +83,13 @@ export function MonitorsWorkspace({ refreshToken }: { refreshToken: number }) {
         }
       });
     return () => controller.abort();
-  }, [refreshToken]);
+  }, [refreshToken, labelFilter]);
 
   return (
     <section className="monitors-workspace" aria-labelledby="monitors-title">
       <div className="monitors-table-panel">
+        <label>Фильтр по метке <select aria-label="Фильтр по метке" value={labelFilter} onChange={(event) => setLabelFilter(event.target.value)}><option value="">Все Метки</option>{availableLabels.map((label) => <option key={label} value={label}>{label}</option>)}</select></label>
+        {operationNotice === null ? null : <p className="status-badge" role="status">{operationNotice}</p>}
         <p className="eyebrow">Мониторы</p>
         <h2 id="monitors-title">Сохранённые Мониторы</h2>
         {monitors.length === 0 ? (
@@ -90,13 +98,14 @@ export function MonitorsWorkspace({ refreshToken }: { refreshToken: number }) {
           <table className="dense-table">
             <thead>
               <tr>
-                <th>Монитор</th><th>Интервал</th><th>Последняя Проверка</th><th>Состояние</th><th>Следующая Проверка</th>
+                <th>Монитор</th><th>Метки</th><th>Интервал</th><th>Последняя Проверка</th><th>Состояние</th><th>Следующая Проверка</th>
               </tr>
             </thead>
             <tbody>
               {monitors.map((monitor) => (
                 <tr key={monitor.id}>
                   <td><button className="table-link" type="button" onClick={() => void loadMonitor(monitor.id, undefined, setSelected)}>{monitor.name}</button></td>
+                  <td>{monitor.labels?.join(", ") || "—"}</td>
                   <td>{monitor.intervalHours} ч</td>
                   <td>{resultLabel(monitor.latestCheckResult)}</td>
                   <td>{monitor.paused ? "Приостановлен" : activeIntentLabel(monitor.activeIntent)}</td>
@@ -155,6 +164,7 @@ export function MonitorsWorkspace({ refreshToken }: { refreshToken: number }) {
                 </li>
               ))}
             </ol>
+            <MonitorEditor key={selected.id} monitor={selected} error={editError} onSaved={(monitor) => { setSelected(monitor); setOperationNotice("Монитор сохранён."); setMonitors((items) => items.map((item) => item.id === monitor.id ? { ...item, ...monitor, latestCheckResult: monitor.history[0]?.result ?? null } : item)); }} onDeleted={() => { setOperationNotice("Монитор удалён."); setMonitors((items) => items.filter((item) => item.id !== selected.id)); setSelected(null); }} onError={setEditError} />
           </>
         )}
       </aside>
@@ -218,6 +228,41 @@ export function MonitorsWorkspace({ refreshToken }: { refreshToken: number }) {
     } finally {
       setPauseBusy(false);
     }
+  }
+}
+
+function MonitorEditor({ monitor, error, onSaved, onDeleted, onError }: { monitor: MonitorDetail; error: string | null; onSaved: (monitor: MonitorDetail) => void; onDeleted: () => void; onError: (message: string | null) => void }) {
+  async function submit(form: HTMLFormElement, resetHistory = false): Promise<void> {
+    const data = new FormData(form);
+    const lines = (name: string) => String(data.get(name) ?? "").split("\n").map((value) => value.trim()).filter(Boolean);
+    const body = { name: String(data.get("name")), url: String(data.get("url")), targetSelectors: lines("targets"), exclusionSelectors: lines("exclusions"), labels: String(data.get("labels") ?? "").split(",").map((value) => value.trim()).filter(Boolean), intervalHours: Number(data.get("interval")), resetHistory };
+    const response = await fetch(`/api/monitors/${monitor.id}`, { method: "PUT", headers: { accept: "application/json", "content-type": "application/json" }, body: JSON.stringify(body) });
+    if (response.status === 409 && !resetHistory) {
+      if (window.confirm("Область наблюдения изменилась. История будет безвозвратно удалена. Продолжить?")) await submit(form, true);
+      return;
+    }
+    if (!response.ok) { onError("Не удалось сохранить Монитор."); return; }
+    onError(null); onSaved(await response.json() as MonitorDetail);
+  }
+  return <form className="monitor-editor" onSubmit={(event) => { event.preventDefault(); void submit(event.currentTarget); }}>
+    <h3>Настройки Монитора</h3>
+    <label>Имя <input name="name" defaultValue={monitor.name} required /></label>
+    <label>URL <input name="url" defaultValue={monitor.url} required /></label>
+    <label>Целевые селекторы <textarea name="targets" defaultValue={monitor.targetSelectors.join("\n")} required /></label>
+    <label>Селекторы исключения <textarea name="exclusions" defaultValue={monitor.exclusionSelectors.join("\n")} /></label>
+    <label>Метки <input name="labels" defaultValue={monitor.labels?.join(", ") ?? ""} /></label>
+    <label>Интервал <select name="interval" defaultValue={monitor.intervalHours}>{[6, 12, 24, 48, 72].map((hours) => <option key={hours} value={hours}>{hours} ч</option>)}</select></label>
+    <button className="secondary-button" type="submit">Сохранить</button>
+    {error === null ? null : <p className="form-error" role="alert">{error}</p>}
+    <button className="secondary-button" type="button" onClick={() => void remove()}>Удалить Монитор</button>
+  </form>;
+
+  async function remove() {
+    const confirmName = window.prompt(`Введите имя «${monitor.name}», чтобы удалить Монитор и всю его Историю.`);
+    if (confirmName === null) return;
+    const response = await fetch(`/api/monitors/${monitor.id}`, { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ confirmName }) });
+    if (!response.ok) { onError("Имя не совпало или Монитор не удалось удалить."); return; }
+    onDeleted();
   }
 }
 

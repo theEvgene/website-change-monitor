@@ -409,6 +409,7 @@ describe("startup UI", () => {
           targetSelectors: [".card"],
           exclusionSelectors: [],
           intervalHours: 24,
+          labels: [],
         }),
       }),
     );

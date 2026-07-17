@@ -24,6 +24,12 @@ export interface CreateMonitorRecord {
   targetSelectors: string[];
   exclusionSelectors: string[];
   intervalHours: 6 | 12 | 24 | 48 | 72;
+  labels?: string[];
+}
+
+export interface UpdateMonitorRecord extends CreateMonitorRecord {
+  labels: string[];
+  resetScope: boolean;
 }
 
 export interface ClaimedCheck {
@@ -70,6 +76,7 @@ export interface MonitorRecord {
   scopeRevision: number;
   nextCheckAt: string | null;
   paused: boolean;
+  labels: string[];
   activeIntent: CheckIntentRecord | null;
   history: MonitorCheckRecord[];
 }
@@ -82,6 +89,7 @@ export interface MonitorSummaryRecord {
   scopeRevision: number;
   nextCheckAt: string | null;
   paused: boolean;
+  labels: string[];
   latestCheckResult: CheckResult | null;
   activeIntent: CheckIntentRecord | null;
 }
@@ -114,6 +122,9 @@ export interface ComparisonSnapshotPair {
 
 export interface MonitorStore {
   createMonitor(input: CreateMonitorRecord, now: string): number;
+  updateMonitor(id: number, input: UpdateMonitorRecord, now: string): boolean;
+  deleteMonitor(id: number): boolean;
+  isCurrentRevision(id: number, revision: number): boolean;
   enqueueManualCheck(monitorId: number, now: string): boolean | undefined;
   reconcileSchedule(now: string, recoverOverdue: boolean): void;
   recoverInterrupted(now: string): void;
@@ -142,7 +153,7 @@ export interface MonitorStore {
     nextCheckAt: string,
   ): void;
   setPaused(monitorId: number, paused: boolean, now: string): boolean | undefined;
-  listMonitors(): MonitorSummaryRecord[];
+  listMonitors(label?: string): MonitorSummaryRecord[];
   listJournal(): JournalCheckRecord[];
   listActiveIntents(): CheckIntentRecord[];
   getComparison(checkId: number): ComparisonSnapshotPair | undefined;
@@ -169,6 +180,19 @@ export function createMonitorStore(
       monitor_id, scope_revision, kind, state, due_at, created_at
     ) VALUES (?, 1, 'scheduled', 'queued', ?, ?)
   `);
+  const upsertLabel = database.prepare(`INSERT INTO labels (name, normalized_name) VALUES (?, ?) ON CONFLICT(normalized_name) DO NOTHING`);
+  const selectLabel = database.prepare(`SELECT id FROM labels WHERE normalized_name = ?`);
+  const linkLabel = database.prepare(`INSERT INTO monitor_labels (monitor_id, label_id) VALUES (?, ?)`);
+
+  function replaceLabels(monitorId: number, labels: string[]): void {
+    database.prepare(`DELETE FROM monitor_labels WHERE monitor_id = ?`).run(monitorId);
+    for (const label of labels) {
+      const normalized = normalizeLabelKey(label);
+      upsertLabel.run(label, normalized);
+      const row = selectLabel.get(normalized) as { id: number };
+      linkLabel.run(monitorId, row.id);
+    }
+  }
 
   const createMonitorTransaction = database.transaction(
     (input: CreateMonitorRecord, now: string) => {
@@ -180,9 +204,38 @@ export function createMonitorStore(
       for (const [position, selector] of input.exclusionSelectors.entries()) {
         insertExclusionSelector.run(monitorId, position, selector);
       }
+      replaceLabels(monitorId, input.labels ?? []);
       insertIntent.run(monitorId, now, now);
       return monitorId;
     },
+  );
+
+  const updateMonitorTransaction = database.transaction((id: number, input: UpdateMonitorRecord, now: string) => {
+    const current = database.prepare(`SELECT scope_revision FROM monitors WHERE id = ?`).get(id) as { scope_revision: number } | undefined;
+    if (current === undefined) return false;
+    const revision = current.scope_revision + (input.resetScope ? 1 : 0);
+    if (input.resetScope) {
+      database.prepare(`DELETE FROM check_intents WHERE monitor_id = ?`).run(id);
+    }
+    database.prepare(`DELETE FROM monitor_target_selectors WHERE monitor_id = ?`).run(id);
+    database.prepare(`DELETE FROM monitor_exclusion_selectors WHERE monitor_id = ?`).run(id);
+    for (const [position, selector] of input.targetSelectors.entries()) insertTargetSelector.run(id, position, selector);
+    for (const [position, selector] of input.exclusionSelectors.entries()) insertExclusionSelector.run(id, position, selector);
+    replaceLabels(id, input.labels);
+    database.prepare(`
+      UPDATE monitors SET name = @name, url = @url, interval_hours = @intervalHours,
+        scope_revision = @revision, current_snapshot_id = CASE WHEN @resetScope = 1 THEN NULL ELSE current_snapshot_id END,
+        next_check_at = CASE WHEN @resetScope = 1 THEN @now ELSE next_check_at END, updated_at = @now
+      WHERE id = @id
+    `).run({ ...input, id, revision, resetScope: input.resetScope ? 1 : 0, now });
+    if (input.resetScope) {
+      database.prepare(`INSERT INTO check_intents (monitor_id, scope_revision, kind, state, due_at, created_at) VALUES (?, ?, 'scheduled', 'queued', ?, ?)`).run(id, revision, now, now);
+    }
+    return true;
+  });
+
+  const deleteMonitorTransaction = database.transaction((id: number) =>
+    database.prepare(`DELETE FROM monitors WHERE id = ?`).run(id).changes === 1,
   );
 
   const selectMonitorRevision = database.prepare(`
@@ -640,6 +693,12 @@ export function createMonitorStore(
 
   return {
     createMonitor: createMonitorTransaction,
+    updateMonitor: updateMonitorTransaction,
+    deleteMonitor: deleteMonitorTransaction,
+    isCurrentRevision(id, revision) {
+      const row = selectMonitorRevision.get(id) as { scope_revision: number } | undefined;
+      return row?.scope_revision === revision;
+    },
     enqueueManualCheck: enqueueManualTransaction,
     reconcileSchedule(now, recoverOverdue) {
       database.transaction(() => {
@@ -679,7 +738,7 @@ export function createMonitorStore(
     completeChange: completeChangeTransaction,
     failCheck: failCheckTransaction,
     setPaused: setPausedTransaction,
-    listMonitors() {
+    listMonitors(label) {
       const rows = database
         .prepare(`
           SELECT m.id, m.name, m.url, m.interval_hours, m.scope_revision,
@@ -697,9 +756,13 @@ export function createMonitorStore(
             ORDER BY CASE ai.state WHEN 'running' THEN 0 ELSE 1 END,
                      ai.due_at, ai.id LIMIT 1
           )
+          WHERE @label IS NULL OR EXISTS (
+            SELECT 1 FROM monitor_labels ml JOIN labels l ON l.id = ml.label_id
+            WHERE ml.monitor_id = m.id AND l.normalized_name = @label
+          )
           ORDER BY m.id
         `)
-        .all() as Array<{
+        .all({ label: label === undefined ? null : normalizeLabelKey(label) }) as Array<{
         id: number;
         name: string;
         url: string;
@@ -725,6 +788,7 @@ export function createMonitorStore(
         scopeRevision: row.scope_revision,
         nextCheckAt: row.next_check_at,
         paused: row.paused === 1,
+        labels: selectLabels(database, row.id),
         latestCheckResult: row.latest_result,
         activeIntent: intentFromJoinedRow(row, row.name),
       }));
@@ -885,6 +949,7 @@ export function createMonitorStore(
         scopeRevision: row.scope_revision,
         nextCheckAt: row.next_check_at,
         paused: row.paused === 1,
+        labels: selectLabels(database, row.id),
         activeIntent: this.listActiveIntents().find((intent) => intent.monitorId === id) ?? null,
         history: checks.map((check) => ({
           id: check.id,
@@ -949,6 +1014,17 @@ function intentFromJoinedRow(row: {
 
 function selectorValues(rows: unknown[]): string[] {
   return (rows as Array<{ selector: string }>).map((row) => row.selector);
+}
+
+function selectLabels(database: BetterSqlite3.Database, monitorId: number): string[] {
+  return (database.prepare(`
+    SELECT l.name FROM labels l JOIN monitor_labels ml ON ml.label_id = l.id
+    WHERE ml.monitor_id = ? ORDER BY l.name COLLATE NOCASE
+  `).all(monitorId) as Array<{ name: string }>).map((row) => row.name);
+}
+
+function normalizeLabelKey(value: string): string {
+  return value.trim().normalize("NFC").toUpperCase().toLowerCase();
 }
 
 function assertChanged(changes: number): void {

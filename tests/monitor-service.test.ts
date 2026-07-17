@@ -1034,4 +1034,51 @@ describe("Monitor use case", () => {
     ));
     await expect(running).resolves.toBeUndefined();
   });
+  it("discards a running old-revision Check when the Observation Scope is reset", async () => {
+    const root = await mkdtemp(join(tmpdir(), "website-change-monitor-"));
+    roots.push(root);
+    const database = openApplicationDatabase({ rootDirectory: root });
+    databases.push(database);
+    const success = successfulPageProbeResult("https://example.com/a", [{ selector: ".a", matchCount: 1 }], simplePagePreviewTargets("A"));
+    let release!: (result: PageProbeResult) => void;
+    let began!: () => void;
+    const running = new Promise<PageProbeResult>((resolve) => { release = resolve; });
+    const started = new Promise<void>((resolve) => { began = resolve; });
+    let calls = 0;
+    const preview = vi.fn<PageProbe["preview"]>(async () => {
+      calls += 1;
+      if (calls === 3) { began(); return running; }
+      return success;
+    });
+    const service = createMonitorService({ database, pageProbe: { preview } });
+    const monitor = await service.createMonitor({ name: "Race", url: "https://example.com/a", targetSelectors: [".a"], exclusionSelectors: [], intervalHours: 12 });
+    const oldCheck = service.requestManualCheck(monitor.id);
+    await started;
+    const reset = service.updateMonitor(monitor.id, { name: "Race", url: "https://example.com/b", targetSelectors: [".a"], exclusionSelectors: [], intervalHours: 12, labels: [], resetHistory: true });
+    await vi.waitFor(() => expect(calls).toBe(4));
+    release(success);
+    await oldCheck;
+    const updated = await reset;
+    expect(updated).toMatchObject({ scopeRevision: 2, history: [{ result: "baseline" }] });
+    expect(updated?.history).toHaveLength(1);
+  });
+
+  it("deletes every dependent record while preserving a shared Label", async () => {
+    const root = await mkdtemp(join(tmpdir(), "website-change-monitor-")); roots.push(root);
+    const database = openApplicationDatabase({ rootDirectory: root }); databases.push(database);
+    const preview = vi.fn<PageProbe["preview"]>().mockResolvedValue(successfulPageProbeResult("https://example.com/a", [{ selector: ".a", matchCount: 1 }], simplePagePreviewTargets("A")));
+    const service = createMonitorService({ database, pageProbe: { preview } });
+    const first = await service.createMonitor({ name: "First", url: "https://example.com/a", targetSelectors: [".a"], exclusionSelectors: [], intervalHours: 12, labels: ["Shared"] });
+    const second = await service.createMonitor({ name: "Second", url: "https://example.com/a", targetSelectors: [".a"], exclusionSelectors: [], intervalHours: 12, labels: ["shared"] });
+    expect(service.deleteMonitor(first.id, "First")).toBe(true);
+    const inspect = new BetterSqlite3(database.path, { readonly: true });
+    try {
+      for (const table of ["monitors", "check_intents", "checks", "snapshots", "monitor_target_selectors", "monitor_exclusion_selectors", "monitor_labels"]) {
+        const row = inspect.prepare(`SELECT count(*) count FROM ${table} WHERE ${table === "monitors" ? "id" : "monitor_id"} = ?`).get(first.id) as { count: number };
+        expect(row.count, table).toBe(0);
+      }
+      expect((inspect.prepare("SELECT count(*) count FROM labels").get() as { count: number }).count).toBe(1);
+      expect(service.getMonitor(second.id)?.labels).toEqual(["Shared"]);
+    } finally { inspect.close(); }
+  });
 });

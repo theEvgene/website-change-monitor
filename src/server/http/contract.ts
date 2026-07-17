@@ -16,6 +16,8 @@ export const apiErrorCodesV1 = [
   "unsupported_selector",
   "invalid_monitor_name",
   "invalid_interval",
+  "scope_reset_required",
+  "delete_confirmation_required",
   "snapshot_invalid",
   "snapshot_too_large",
 ] as const;
@@ -229,7 +231,19 @@ export const monitorCreateRequestSchemaV1 = {
       items: { type: "string" },
     },
     intervalHours: { enum: [6, 12, 24, 48, 72], type: "integer" },
+    labels: { type: "array", items: { type: "string", minLength: 1 }, uniqueItems: true },
   },
+} as const;
+
+export const monitorUpdateRequestSchemaV1 = {
+  ...monitorCreateRequestSchemaV1,
+  $id: "MonitorUpdateRequestV1",
+  properties: { ...monitorCreateRequestSchemaV1.properties, resetHistory: { type: "boolean" } },
+} as const;
+
+export const monitorDeleteRequestSchemaV1 = {
+  $id: "MonitorDeleteRequestV1", type: "object", additionalProperties: false,
+  required: ["confirmName"], properties: { confirmName: { type: "string" } },
 } as const;
 
 const snapshotMetadataProperties = {
@@ -335,6 +349,7 @@ const monitorSummaryProperties = {
   },
   paused: { type: "boolean" },
   activeIntent: activeIntentSchema,
+  labels: { type: "array", items: { type: "string" } },
 } as const;
 
 export const monitorSummarySchemaV1 = {
@@ -351,6 +366,7 @@ export const monitorSummarySchemaV1 = {
     "latestCheckResult",
     "paused",
     "activeIntent",
+    "labels",
   ],
   properties: monitorSummaryProperties,
 } as const;
@@ -377,6 +393,7 @@ export const monitorDetailSchemaV1 = {
     "paused",
     "activeIntent",
     "history",
+    "labels",
   ],
   properties: {
     id: monitorSummaryProperties.id,
@@ -384,6 +401,7 @@ export const monitorDetailSchemaV1 = {
     url: monitorSummaryProperties.url,
     targetSelectors: { type: "array", items: { type: "string" } },
     exclusionSelectors: { type: "array", items: { type: "string" } },
+    labels: monitorSummaryProperties.labels,
     intervalHours: monitorSummaryProperties.intervalHours,
     scopeRevision: monitorSummaryProperties.scopeRevision,
     nextCheckAt: monitorSummaryProperties.nextCheckAt,
@@ -553,10 +571,23 @@ export const createMonitorRouteSchema: FastifySchema = {
 export const listMonitorsRouteSchema: FastifySchema = {
   operationId: "listMonitors",
   summary: "Получить Мониторы",
+  querystring: { type: "object", additionalProperties: false, properties: { label: { type: "string" } } },
   response: {
     200: { $ref: "MonitorListResponseV1#" },
     ...commonErrors,
   },
+};
+
+export const updateMonitorRouteSchema: FastifySchema = {
+  operationId: "updateMonitor", summary: "Изменить Монитор",
+  params: monitorIdParams, body: { $ref: "MonitorUpdateRequestV1#" },
+  response: { 200: { $ref: "MonitorDetailV1#" }, 400: { $ref: "ApiErrorV1#" }, 404: { $ref: "ApiErrorV1#" }, 409: { $ref: "ApiErrorV1#" }, 422: { $ref: "ApiErrorV1#" }, 502: { $ref: "ApiErrorV1#" }, 504: { $ref: "ApiErrorV1#" }, ...commonErrors },
+};
+
+export const deleteMonitorRouteSchema: FastifySchema = {
+  operationId: "deleteMonitor", summary: "Удалить Монитор и его данные",
+  params: monitorIdParams, body: { $ref: "MonitorDeleteRequestV1#" },
+  response: { 204: { type: "null" }, 400: { $ref: "ApiErrorV1#" }, 404: { $ref: "ApiErrorV1#" }, ...commonErrors },
 };
 
 export const getMonitorRouteSchema: FastifySchema = {

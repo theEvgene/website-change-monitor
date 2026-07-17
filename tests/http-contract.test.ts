@@ -56,6 +56,8 @@ describe("public HTTP contract", () => {
     expect(document.paths["/api/monitors/{monitorId}"]?.get?.operationId).toBe(
       "getMonitor",
     );
+    expect(document.paths["/api/monitors/{monitorId}"]?.put?.operationId).toBe("updateMonitor");
+    expect(document.paths["/api/monitors/{monitorId}"]?.delete?.operationId).toBe("deleteMonitor");
     expect(
       document.paths["/api/monitors/{monitorId}/checks"]?.get?.operationId,
     ).toBe("listMonitorChecks");
@@ -76,9 +78,11 @@ describe("public HTTP contract", () => {
       "MonitorCheckListResponseV1",
       "MonitorCheckV1",
       "MonitorCreateRequestV1",
+      "MonitorDeleteRequestV1",
       "MonitorDetailV1",
       "MonitorListResponseV1",
       "MonitorSummaryV1",
+      "MonitorUpdateRequestV1",
       "PreviewRequestV1",
       "PreviewResponseV1",
       "VersionResponseV1",

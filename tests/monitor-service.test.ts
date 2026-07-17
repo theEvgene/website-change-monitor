@@ -627,7 +627,7 @@ describe("Monitor use case", () => {
     });
     database.close();
 
-    now = new Date("2026-07-18T09:00:00.000Z");
+    now = new Date("2026-07-17T14:00:00.000Z");
     const reopened = openApplicationDatabase({ rootDirectory: root });
     databases.push(reopened);
     const restarted = createMonitorService({
@@ -637,7 +637,7 @@ describe("Monitor use case", () => {
     await restarted.runAvailableChecks();
 
     expect(restarted.getMonitor(monitor.id)).toMatchObject({
-      nextCheckAt: "2026-07-18T15:00:00.000Z",
+      nextCheckAt: "2026-07-17T20:00:00.000Z",
       history: [
         { kind: "overdue", result: "no_change" },
         { kind: "scheduled", result: "baseline" },

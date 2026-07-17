@@ -513,9 +513,13 @@ export function createMonitorStore(
       database.transaction(() => {
         if (recoverOverdue) {
           database.prepare(`
-            UPDATE check_intents
+            UPDATE check_intents AS i
             SET kind = 'overdue'
-            WHERE state = 'queued' AND kind = 'scheduled' AND due_at < ?
+            WHERE i.state = 'queued' AND i.kind = 'scheduled' AND i.due_at <= ?
+              AND EXISTS (
+                SELECT 1 FROM monitors m
+                WHERE m.id = i.monitor_id AND m.current_snapshot_id IS NOT NULL
+              )
           `).run(now);
         }
         database.prepare(`

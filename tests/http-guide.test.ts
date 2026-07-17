@@ -68,6 +68,10 @@ describe("documented direct HTTP examples", () => {
       example(guide, "powershell-comparison"),
       port,
     );
+    const checkIntentsResult = await runDocumentedExample(
+      example(guide, "powershell-check-intents"),
+      port,
+    );
 
     expect(JSON.parse(powershellResult)).toMatchObject({
       application: "website-change-monitor",
@@ -130,6 +134,13 @@ describe("documented direct HTTP examples", () => {
       complete: true,
       targets: expect.any(Array),
     });
+    const intentsJson = JSON.parse(checkIntentsResult) as unknown;
+    const intents = Array.isArray(intentsJson)
+      ? intentsJson
+      : (intentsJson as { value: unknown[] }).value;
+    expect(intents).toEqual(expect.arrayContaining([
+      expect.objectContaining({ monitorName: "Catalog", kind: "scheduled", state: "queued" }),
+    ]));
   });
 });
 

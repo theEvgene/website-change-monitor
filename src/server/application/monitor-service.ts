@@ -5,6 +5,7 @@ import type {
 } from "../persistence/database.js";
 import type {
   CreateMonitorRecord,
+  CheckIntentRecord,
   JournalCheckRecord,
   MonitorRecord,
   MonitorSummaryRecord,
@@ -65,6 +66,7 @@ export interface MonitorService {
   requestManualCheck(id: number): Promise<MonitorView | undefined>;
   listMonitors(): MonitorSummary[];
   listJournal(): JournalCheckRecord[];
+  listActiveIntents(): CheckIntentRecord[];
   getComparison(id: number):
     | (SnapshotComparison & {
         checkId: number;
@@ -94,15 +96,23 @@ export function createMonitorService(options: {
 }): MonitorService {
   const clock = options.clock ?? { now: () => new Date() };
   let workerTail: Promise<void> = Promise.resolve();
+  let recoverOverdue = true;
+  let consecutiveManualChecks = 0;
 
   async function drainChecks(): Promise<void> {
+    const now = clock.now().toISOString();
+    options.database.monitors.reconcileSchedule(now, recoverOverdue);
+    recoverOverdue = false;
     for (;;) {
       const claimed = options.database.monitors.claimNextCheck(
         clock.now().toISOString(),
+        consecutiveManualChecks >= 3,
       );
       if (claimed === undefined) {
         return;
       }
+      consecutiveManualChecks =
+        claimed.kind === "manual" ? consecutiveManualChecks + 1 : 0;
       const result = await options.pageProbe.preview({
         url: claimed.url,
         targetSelectors: claimed.targetSelectors,
@@ -208,6 +218,7 @@ export function createMonitorService(options: {
     },
     listMonitors: () => options.database.monitors.listMonitors(),
     listJournal: () => options.database.monitors.listJournal(),
+    listActiveIntents: () => options.database.monitors.listActiveIntents(),
     getComparison(id) {
       const pair = options.database.monitors.getComparison(id);
       if (pair === undefined) return undefined;

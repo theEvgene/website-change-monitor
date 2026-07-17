@@ -288,6 +288,38 @@ export const monitorCheckSchemaV1 = {
   properties: checkProperties,
 } as const;
 
+export const checkIntentSchemaV1 = {
+  $id: "CheckIntentV1",
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "id", "monitorId", "monitorName", "scopeRevision", "kind", "state",
+    "dueAt", "createdAt", "startedAt", "finishedAt",
+  ],
+  properties: {
+    id: { type: "integer", minimum: 1 },
+    monitorId: { type: "integer", minimum: 1 },
+    monitorName: { type: "string" },
+    scopeRevision: { type: "integer", minimum: 1 },
+    kind: checkProperties.kind,
+    state: { enum: ["queued", "running"], type: "string" },
+    dueAt: { type: "string", format: "date-time" },
+    createdAt: { type: "string", format: "date-time" },
+    startedAt: { type: ["string", "null"], format: "date-time" },
+    finishedAt: { type: ["string", "null"], format: "date-time" },
+  },
+} as const;
+
+export const checkIntentListResponseSchemaV1 = {
+  $id: "CheckIntentListResponseV1",
+  type: "array",
+  items: { $ref: "CheckIntentV1#" },
+} as const;
+
+const activeIntentSchema = {
+  anyOf: [{ $ref: "CheckIntentV1#" }, { type: "null" }],
+} as const;
+
 const monitorSummaryProperties = {
   id: { type: "integer", minimum: 1 },
   name: { type: "string" },
@@ -299,6 +331,7 @@ const monitorSummaryProperties = {
     enum: ["baseline", "no_change", "change", "error", null],
     type: ["string", "null"],
   },
+  activeIntent: activeIntentSchema,
 } as const;
 
 export const monitorSummarySchemaV1 = {
@@ -313,6 +346,7 @@ export const monitorSummarySchemaV1 = {
     "scopeRevision",
     "nextCheckAt",
     "latestCheckResult",
+    "activeIntent",
   ],
   properties: monitorSummaryProperties,
 } as const;
@@ -336,6 +370,7 @@ export const monitorDetailSchemaV1 = {
     "intervalHours",
     "scopeRevision",
     "nextCheckAt",
+    "activeIntent",
     "history",
   ],
   properties: {
@@ -347,6 +382,7 @@ export const monitorDetailSchemaV1 = {
     intervalHours: monitorSummaryProperties.intervalHours,
     scopeRevision: monitorSummaryProperties.scopeRevision,
     nextCheckAt: monitorSummaryProperties.nextCheckAt,
+    activeIntent: monitorSummaryProperties.activeIntent,
     history: { type: "array", items: { $ref: "MonitorCheckV1#" } },
   },
 } as const;
@@ -553,6 +589,15 @@ export const listJournalRouteSchema: FastifySchema = {
   summary: "Получить общий Журнал Проверок",
   response: {
     200: { $ref: "JournalResponseV1#" },
+    ...commonErrors,
+  },
+};
+
+export const listCheckIntentsRouteSchema: FastifySchema = {
+  operationId: "listCheckIntents",
+  summary: "Получить активную очередь Проверок",
+  response: {
+    200: { $ref: "CheckIntentListResponseV1#" },
     ...commonErrors,
   },
 };

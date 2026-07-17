@@ -512,4 +512,174 @@ describe("Monitor use case", () => {
       }),
     ]);
   });
+
+  it("runs a due scheduled Check and computes the next deadline from its completion", async () => {
+    const root = await mkdtemp(join(tmpdir(), "website-change-monitor-"));
+    roots.push(root);
+    const database = openApplicationDatabase({ rootDirectory: root });
+    databases.push(database);
+    const observed = successfulPageProbeResult(
+      "https://example.com/catalog",
+      [{ selector: ".card", matchCount: 1 }],
+      simplePagePreviewTargets("Product"),
+    );
+    const preview = vi.fn<PageProbe["preview"]>().mockResolvedValue(observed);
+    let now = new Date("2026-07-17T08:00:00.000Z");
+    const service = createMonitorService({
+      database,
+      pageProbe: { preview },
+      clock: { now: () => now },
+    });
+    const monitor = await service.createMonitor({
+      name: "Catalog", url: "https://example.com/catalog",
+      targetSelectors: [".card"], exclusionSelectors: [], intervalHours: 6,
+    });
+
+    now = new Date("2026-07-17T14:03:00.000Z");
+    await service.runAvailableChecks();
+
+    expect(service.getMonitor(monitor.id)).toMatchObject({
+      nextCheckAt: "2026-07-17T20:03:00.000Z",
+      history: [
+        { kind: "scheduled", result: "no_change" },
+        { kind: "scheduled", result: "baseline" },
+      ],
+    });
+  });
+
+  it.each([
+    [6, "2026-07-17T14:00:00.000Z"],
+    [12, "2026-07-17T20:00:00.000Z"],
+    [24, "2026-07-18T08:00:00.000Z"],
+    [48, "2026-07-19T08:00:00.000Z"],
+    [72, "2026-07-20T08:00:00.000Z"],
+  ] as const)("persists the %s-hour deadline as %s", async (interval, expected) => {
+    const root = await mkdtemp(join(tmpdir(), "website-change-monitor-"));
+    roots.push(root);
+    const database = openApplicationDatabase({ rootDirectory: root });
+    databases.push(database);
+    const observed = successfulPageProbeResult(
+      "https://example.com/catalog",
+      [{ selector: ".card", matchCount: 1 }],
+      simplePagePreviewTargets("Product"),
+    );
+    const service = createMonitorService({
+      database, pageProbe: { preview: async () => observed },
+      clock: { now: () => new Date("2026-07-17T08:00:00.000Z") },
+    });
+
+    const monitor = await service.createMonitor({
+      name: "Catalog", url: "https://example.com/catalog",
+      targetSelectors: [".card"], exclusionSelectors: [], intervalHours: interval,
+    });
+
+    expect(monitor.nextCheckAt).toBe(expected);
+    expect(monitor.activeIntent).toMatchObject({ kind: "scheduled", dueAt: expected });
+  });
+
+  it("coalesces a manual click on the ordinary deadline into one Check", async () => {
+    const root = await mkdtemp(join(tmpdir(), "website-change-monitor-"));
+    roots.push(root);
+    const database = openApplicationDatabase({ rootDirectory: root });
+    databases.push(database);
+    const observed = successfulPageProbeResult(
+      "https://example.com/catalog",
+      [{ selector: ".card", matchCount: 1 }],
+      simplePagePreviewTargets("Product"),
+    );
+    const preview = vi.fn<PageProbe["preview"]>().mockResolvedValue(observed);
+    let now = new Date("2026-07-17T08:00:00.000Z");
+    const service = createMonitorService({
+      database, pageProbe: { preview }, clock: { now: () => now },
+    });
+    const monitor = await service.createMonitor({
+      name: "Catalog", url: "https://example.com/catalog",
+      targetSelectors: [".card"], exclusionSelectors: [], intervalHours: 6,
+    });
+
+    now = new Date("2026-07-17T14:00:00.000Z");
+    await service.requestManualCheck(monitor.id);
+    await service.runAvailableChecks();
+
+    expect(service.getMonitor(monitor.id)?.history.map((check) => check.kind)).toEqual([
+      "manual", "scheduled",
+    ]);
+    expect(preview).toHaveBeenCalledTimes(3);
+  });
+
+  it("collapses downtime into one overdue Check and keeps the next schedule durable", async () => {
+    const root = await mkdtemp(join(tmpdir(), "website-change-monitor-"));
+    roots.push(root);
+    const database = openApplicationDatabase({ rootDirectory: root });
+    const observed = successfulPageProbeResult(
+      "https://example.com/catalog",
+      [{ selector: ".card", matchCount: 1 }],
+      simplePagePreviewTargets("Product"),
+    );
+    const preview = vi.fn<PageProbe["preview"]>().mockResolvedValue(observed);
+    let now = new Date("2026-07-17T08:00:00.000Z");
+    const first = createMonitorService({
+      database, pageProbe: { preview }, clock: { now: () => now },
+    });
+    const monitor = await first.createMonitor({
+      name: "Catalog", url: "https://example.com/catalog",
+      targetSelectors: [".card"], exclusionSelectors: [], intervalHours: 6,
+    });
+    database.close();
+
+    now = new Date("2026-07-18T09:00:00.000Z");
+    const reopened = openApplicationDatabase({ rootDirectory: root });
+    databases.push(reopened);
+    const restarted = createMonitorService({
+      database: reopened, pageProbe: { preview }, clock: { now: () => now },
+    });
+    await restarted.runAvailableChecks();
+    await restarted.runAvailableChecks();
+
+    expect(restarted.getMonitor(monitor.id)).toMatchObject({
+      nextCheckAt: "2026-07-18T15:00:00.000Z",
+      history: [
+        { kind: "overdue", result: "no_change" },
+        { kind: "scheduled", result: "baseline" },
+      ],
+    });
+    expect(preview).toHaveBeenCalledTimes(3);
+  });
+
+  it("serves three manuals, then automatic work, with one PageProbe at a time", async () => {
+    const root = await mkdtemp(join(tmpdir(), "website-change-monitor-"));
+    roots.push(root);
+    const database = openApplicationDatabase({ rootDirectory: root });
+    databases.push(database);
+    const now = "2026-07-17T08:00:00.000Z";
+    for (const name of ["A", "B", "C", "D"]) {
+      const monitorId = database.monitors.createMonitor({
+        name, url: `https://example.com/${name}`,
+        targetSelectors: ["main"], exclusionSelectors: [], intervalHours: 6,
+      }, now);
+      database.monitors.enqueueManualCheck(monitorId, now);
+    }
+    let active = 0;
+    let maximumActive = 0;
+    const preview = vi.fn<PageProbe["preview"]>().mockImplementation(async (input) => {
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      await Promise.resolve();
+      active -= 1;
+      return successfulPageProbeResult(
+        input.url, [{ selector: "main", matchCount: 1 }],
+        simplePagePreviewTargets("Product"),
+      );
+    });
+    const service = createMonitorService({
+      database, pageProbe: { preview }, clock: { now: () => new Date(now) },
+    });
+
+    await service.runAvailableChecks();
+
+    expect(service.listJournal().map((check) => check.kind).reverse()).toEqual([
+      "manual", "manual", "manual", "scheduled", "manual",
+    ]);
+    expect(maximumActive).toBe(1);
+  });
 });

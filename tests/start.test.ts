@@ -105,6 +105,43 @@ describe("application start", () => {
     }
   });
 
+  it("keeps polling the durable queue while the application is running", async () => {
+    const { root, staticRoot } = await applicationFixture();
+    const port = await freePort();
+    const database = openApplicationDatabase({ rootDirectory: root });
+    const monitorId = database.monitors.createMonitor({
+      name: "Catalog", url: "https://example.com/catalog",
+      targetSelectors: [".card"], exclusionSelectors: [], intervalHours: 6,
+    }, new Date(Date.now() + 150).toISOString());
+    database.close();
+    const preview = vi.fn().mockResolvedValue(
+      successfulPageProbeResult(
+        "https://example.com/catalog",
+        [{ selector: ".card", matchCount: 1 }],
+        simplePagePreviewTargets("Product"),
+      ),
+    );
+    let outcome: Awaited<ReturnType<typeof startApplication>> | undefined;
+
+    try {
+      outcome = await startApplication({
+        rootDirectory: root, staticRoot, port, version: "0.1.0",
+        openBrowser: async () => undefined,
+        startPageProbe: async () => ({ pageProbe: { preview }, close: async () => undefined }),
+        workerIntervalMs: 20,
+      });
+      await vi.waitFor(() => expect(preview).toHaveBeenCalledOnce(), { timeout: 2_000 });
+
+      const response = await fetch(`http://127.0.0.1:${port}/api/monitors/${monitorId}`);
+      await expect(response.json()).resolves.toMatchObject({
+        history: [{ kind: "scheduled", result: "baseline" }],
+      });
+    } finally {
+      if (outcome?.kind === "started") await outcome.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("opens the UI of an existing Website Change Monitor instance", async () => {
     const { root, staticRoot } = await applicationFixture();
     const port = await freePort();

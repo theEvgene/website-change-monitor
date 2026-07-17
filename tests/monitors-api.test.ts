@@ -47,6 +47,11 @@ describe("Monitors HTTP API", () => {
       intervalHours: 12,
       scopeRevision: 1,
       nextCheckAt: expect.any(String),
+      activeIntent: {
+        kind: "scheduled",
+        state: "queued",
+        dueAt: expect.any(String),
+      },
       history: [
         {
           status: "succeeded",
@@ -91,6 +96,22 @@ describe("Monitors HTTP API", () => {
     });
     expect(checksResponse.statusCode).toBe(200);
     expect(checksResponse.json()).toEqual(created.history);
+
+    const queueResponse = await server.inject({
+      method: "GET",
+      url: "/api/check-intents",
+      headers: { host: "127.0.0.1:43117" },
+    });
+    expect(queueResponse.statusCode).toBe(200);
+    expect(queueResponse.json()).toEqual([
+      expect.objectContaining({
+        monitorId: created.id,
+        monitorName: "Каталог",
+        kind: "scheduled",
+        state: "queued",
+        dueAt: created.nextCheckAt,
+      }),
+    ]);
   });
 
   it("runs a manual Check through the documented Monitor API", async () => {

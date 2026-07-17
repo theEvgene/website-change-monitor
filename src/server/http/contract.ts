@@ -14,6 +14,10 @@ export const apiErrorCodesV1 = [
   ...pageProbeErrorCodes,
   "duplicate_selector",
   "unsupported_selector",
+  "invalid_monitor_name",
+  "invalid_interval",
+  "snapshot_invalid",
+  "snapshot_too_large",
 ] as const;
 export type ApiErrorCodeV1 = (typeof apiErrorCodesV1)[number];
 
@@ -201,6 +205,154 @@ export const previewResponseSchemaV1 = {
   },
 } as const;
 
+export const monitorCreateRequestSchemaV1 = {
+  $id: "MonitorCreateRequestV1",
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "name",
+    "url",
+    "targetSelectors",
+    "exclusionSelectors",
+    "intervalHours",
+  ],
+  properties: {
+    name: { type: "string", minLength: 1 },
+    url: { type: "string", minLength: 1 },
+    targetSelectors: {
+      type: "array",
+      minItems: 1,
+      items: { type: "string" },
+    },
+    exclusionSelectors: {
+      type: "array",
+      items: { type: "string" },
+    },
+    intervalHours: { enum: [6, 12, 24, 48, 72], type: "integer" },
+  },
+} as const;
+
+const snapshotMetadataProperties = {
+  id: { type: "integer", minimum: 1 },
+  formatVersion: { const: 1, type: "integer" },
+  sha256: { type: "string", pattern: "^[a-f0-9]{64}$" },
+} as const;
+
+const checkProperties = {
+  id: { type: "integer", minimum: 1 },
+  kind: {
+    enum: ["scheduled", "overdue", "manual", "retry"],
+    type: "string",
+  },
+  status: { enum: ["running", "succeeded", "failed"], type: "string" },
+  result: {
+    enum: ["baseline", "no_change", "change", "error", null],
+    type: ["string", "null"],
+  },
+  startedAt: { type: "string", format: "date-time" },
+  completedAt: { type: ["string", "null"], format: "date-time" },
+  errorCode: { type: ["string", "null"] },
+  errorMessage: { type: ["string", "null"] },
+  snapshot: {
+    anyOf: [
+      {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "formatVersion", "sha256"],
+        properties: snapshotMetadataProperties,
+      },
+      { type: "null" },
+    ],
+  },
+} as const;
+
+export const monitorCheckSchemaV1 = {
+  $id: "MonitorCheckV1",
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "id",
+    "kind",
+    "status",
+    "result",
+    "startedAt",
+    "completedAt",
+    "errorCode",
+    "errorMessage",
+    "snapshot",
+  ],
+  properties: checkProperties,
+} as const;
+
+const monitorSummaryProperties = {
+  id: { type: "integer", minimum: 1 },
+  name: { type: "string" },
+  url: { type: "string" },
+  intervalHours: { enum: [6, 12, 24, 48, 72], type: "integer" },
+  scopeRevision: { type: "integer", minimum: 1 },
+  nextCheckAt: { type: ["string", "null"], format: "date-time" },
+  latestCheckResult: {
+    enum: ["baseline", "no_change", "change", "error", null],
+    type: ["string", "null"],
+  },
+} as const;
+
+export const monitorSummarySchemaV1 = {
+  $id: "MonitorSummaryV1",
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "id",
+    "name",
+    "url",
+    "intervalHours",
+    "scopeRevision",
+    "nextCheckAt",
+    "latestCheckResult",
+  ],
+  properties: monitorSummaryProperties,
+} as const;
+
+export const monitorListResponseSchemaV1 = {
+  $id: "MonitorListResponseV1",
+  type: "array",
+  items: { $ref: "MonitorSummaryV1#" },
+} as const;
+
+export const monitorDetailSchemaV1 = {
+  $id: "MonitorDetailV1",
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "id",
+    "name",
+    "url",
+    "targetSelectors",
+    "exclusionSelectors",
+    "intervalHours",
+    "scopeRevision",
+    "nextCheckAt",
+    "history",
+  ],
+  properties: {
+    id: monitorSummaryProperties.id,
+    name: monitorSummaryProperties.name,
+    url: monitorSummaryProperties.url,
+    targetSelectors: { type: "array", items: { type: "string" } },
+    exclusionSelectors: { type: "array", items: { type: "string" } },
+    intervalHours: monitorSummaryProperties.intervalHours,
+    scopeRevision: monitorSummaryProperties.scopeRevision,
+    nextCheckAt: monitorSummaryProperties.nextCheckAt,
+    history: { type: "array", items: { $ref: "MonitorCheckV1#" } },
+  },
+} as const;
+
+export const monitorCheckListResponseSchemaV1 = {
+  $id: "MonitorCheckListResponseV1",
+  type: "array",
+  items: { $ref: "MonitorCheckV1#" },
+} as const;
+
 const commonErrors = {
   403: { $ref: "ApiErrorV1#" },
   421: { $ref: "ApiErrorV1#" },
@@ -235,6 +387,60 @@ export const previewRouteSchema: FastifySchema = {
     422: { $ref: "ApiErrorV1#" },
     502: { $ref: "ApiErrorV1#" },
     504: { $ref: "ApiErrorV1#" },
+    ...commonErrors,
+  },
+};
+
+const monitorIdParams = {
+  type: "object",
+  additionalProperties: false,
+  required: ["monitorId"],
+  properties: {
+    monitorId: { type: "integer", minimum: 1 },
+  },
+} as const;
+
+export const createMonitorRouteSchema: FastifySchema = {
+  operationId: "createMonitor",
+  summary: "Создать Монитор и Базовый снимок",
+  body: { $ref: "MonitorCreateRequestV1#" },
+  response: {
+    201: { $ref: "MonitorDetailV1#" },
+    400: { $ref: "ApiErrorV1#" },
+    422: { $ref: "ApiErrorV1#" },
+    502: { $ref: "ApiErrorV1#" },
+    504: { $ref: "ApiErrorV1#" },
+    ...commonErrors,
+  },
+};
+
+export const listMonitorsRouteSchema: FastifySchema = {
+  operationId: "listMonitors",
+  summary: "Получить Мониторы",
+  response: {
+    200: { $ref: "MonitorListResponseV1#" },
+    ...commonErrors,
+  },
+};
+
+export const getMonitorRouteSchema: FastifySchema = {
+  operationId: "getMonitor",
+  summary: "Получить Монитор и его Историю",
+  params: monitorIdParams,
+  response: {
+    200: { $ref: "MonitorDetailV1#" },
+    404: { $ref: "ApiErrorV1#" },
+    ...commonErrors,
+  },
+};
+
+export const listMonitorChecksRouteSchema: FastifySchema = {
+  operationId: "listMonitorChecks",
+  summary: "Получить Проверки Монитора",
+  params: monitorIdParams,
+  response: {
+    200: { $ref: "MonitorCheckListResponseV1#" },
+    404: { $ref: "ApiErrorV1#" },
     ...commonErrors,
   },
 };

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { PreviewPanel } from "./PreviewPanel.js";
+import { MonitorsWorkspace } from "./MonitorsWorkspace.js";
 
 interface HealthResponse {
   application: "website-change-monitor";
@@ -29,6 +30,7 @@ type HealthState =
 
 export function App() {
   const [state, setState] = useState<HealthState>({ kind: "loading" });
+  const [monitorRefresh, setMonitorRefresh] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -124,7 +126,8 @@ export function App() {
             </>
           ) : null}
         </section>
-        <PreviewPanel />
+        <PreviewPanel onMonitorCreated={() => setMonitorRefresh((value) => value + 1)} />
+        <MonitorsWorkspace refreshToken={monitorRefresh} />
       </main>
     </div>
   );

@@ -4,6 +4,8 @@ import { join } from "node:path";
 import BetterSqlite3 from "better-sqlite3";
 
 import { initialMigration } from "./migrations/001-initial.js";
+import { monitorsMigration } from "./migrations/002-monitors.js";
+import { createMonitorStore, type MonitorStore } from "./monitor-store.js";
 
 export interface DatabaseDiagnostics {
   status: "ready";
@@ -16,6 +18,7 @@ export interface DatabaseDiagnostics {
 
 export interface ApplicationDatabase {
   readonly path: string;
+  readonly monitors: MonitorStore;
   diagnostics(): DatabaseDiagnostics;
   close(): void;
 }
@@ -30,7 +33,7 @@ export interface DatabaseInspection {
   telegramExecutablePath: string | null;
 }
 
-const migrations = [initialMigration];
+const migrations = [initialMigration, monitorsMigration];
 
 export function openApplicationDatabase(
   options: OpenApplicationDatabaseOptions,
@@ -78,6 +81,7 @@ export function openApplicationDatabase(
 
   return {
     path: databasePath,
+    monitors: createMonitorStore(database),
     diagnostics() {
       const schemaVersion = database
         .prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations")

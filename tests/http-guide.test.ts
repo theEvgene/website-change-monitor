@@ -52,6 +52,10 @@ describe("documented direct HTTP examples", () => {
       example(guide, "powershell-preview"),
       port,
     );
+    const createdMonitorResult = await runDocumentedExample(
+      example(guide, "powershell-create-monitor"),
+      port,
+    );
 
     expect(JSON.parse(powershellResult)).toMatchObject({
       application: "website-change-monitor",
@@ -71,6 +75,22 @@ describe("documented direct HTTP examples", () => {
       exclusionSelectors: [".price"],
       targetCount: 3,
       targets: simplePagePreviewTargets("Catalog", "Product A", "Product B"),
+    });
+    expect(JSON.parse(createdMonitorResult)).toMatchObject({
+      name: "Catalog",
+      targetSelectors: [".page-title", ".product-card"],
+      exclusionSelectors: [".price"],
+      intervalHours: 12,
+      history: [
+        {
+          status: "succeeded",
+          result: "baseline",
+          snapshot: {
+            formatVersion: 1,
+            sha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+          },
+        },
+      ],
     });
   });
 });

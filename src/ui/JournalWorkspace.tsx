@@ -22,7 +22,7 @@ interface JournalCheck {
   isFinalError: boolean;
 }
 
-export function JournalWorkspace() {
+export function JournalWorkspace({ selectedCheckId }: { selectedCheckId: number | undefined }) {
   const [checks, setChecks] = useState<JournalCheck[]>([]);
   const [failed, setFailed] = useState(false);
   const [comparison, setComparison] = useState<ComparisonResponse | null>(null);
@@ -50,8 +50,8 @@ export function JournalWorkspace() {
         <table className="dense-table">
           <thead><tr><th>Монитор</th><th>Время</th><th>Вид</th><th>Результат</th><th /></tr></thead>
           <tbody>{checks.map((check) => (
-            <tr key={check.id}>
-              <td>{check.monitorName}</td>
+              <tr key={check.id} className={check.id === selectedCheckId ? "selected-check" : undefined} aria-current={check.id === selectedCheckId ? "true" : undefined}>
+              <td>{check.monitorName}{check.id === selectedCheckId ? <span className="status-badge">Выбрано</span> : null}</td>
               <td>{formatDate(check.completedAt ?? check.startedAt)}</td>
               <td>{kindLabel(check.kind)}</td>
               <td>{resultLabel(check)}</td>

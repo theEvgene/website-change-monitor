@@ -37,12 +37,34 @@ export interface ClaimedCheck {
   intentId: number;
   kind: CheckIntentKind;
   monitorId: number;
+  monitorName: string;
+  chainCheckId: number;
   scopeRevision: number;
   intervalHours: 6 | 12 | 24 | 48 | 72;
   url: string;
   targetSelectors: string[];
   exclusionSelectors: string[];
   currentSnapshot: (SnapshotRecord & { id: number }) | null;
+}
+
+export interface NotificationEventRecord {
+  id: number;
+  kind: "change_detected" | "check_failed_final";
+  monitorId: number;
+  monitorName: string;
+  scopeRevision: number;
+  checkId: number;
+  chainCheckId: number;
+  title: string;
+  body: string;
+  observedAt: string;
+  targetPath: string;
+  dedupeKey: string;
+}
+
+export interface NotificationFeed {
+  highWaterMark: number;
+  items: NotificationEventRecord[];
 }
 
 export interface SnapshotRecord {
@@ -158,6 +180,7 @@ export interface MonitorStore {
   listActiveIntents(): CheckIntentRecord[];
   getComparison(checkId: number): ComparisonSnapshotPair | undefined;
   getMonitor(id: number): MonitorRecord | undefined;
+  listNotifications(afterId?: number): NotificationFeed;
 }
 
 export function createMonitorStore(
@@ -269,7 +292,7 @@ export function createMonitorStore(
   );
 
   const selectNextIntent = database.prepare(`
-    SELECT i.id, i.monitor_id, i.scope_revision, i.kind
+    SELECT i.id, i.monitor_id, i.scope_revision, i.kind, i.retry_of_check_id
     FROM check_intents i
     JOIN monitors m ON m.id = i.monitor_id
     WHERE i.state = 'queued' AND i.due_at <= ?
@@ -283,7 +306,7 @@ export function createMonitorStore(
     LIMIT 1
   `);
   const selectNextAutomaticIntent = database.prepare(`
-    SELECT i.id, i.monitor_id, i.scope_revision, i.kind
+    SELECT i.id, i.monitor_id, i.scope_revision, i.kind, i.retry_of_check_id
     FROM check_intents i
     JOIN monitors m ON m.id = i.monitor_id
     WHERE i.state = 'queued' AND i.due_at <= ? AND i.kind <> 'manual'
@@ -306,7 +329,7 @@ export function createMonitorStore(
     ) VALUES (?, ?, ?, ?, 'running', ?)
   `);
   const selectMonitorForCheck = database.prepare(`
-    SELECT id, url, scope_revision, interval_hours, current_snapshot_id
+    SELECT id, name, url, scope_revision, interval_hours, current_snapshot_id
     FROM monitors
     WHERE id = ?
   `);
@@ -334,6 +357,7 @@ export function createMonitorStore(
           monitor_id: number;
           scope_revision: number;
           kind: CheckIntentKind;
+          retry_of_check_id: number | null;
         }
       | undefined;
     if (intent === undefined) {
@@ -351,6 +375,7 @@ export function createMonitorStore(
     );
     const monitor = selectMonitorForCheck.get(intent.monitor_id) as {
       id: number;
+      name: string;
       url: string;
       scope_revision: number;
       interval_hours: 6 | 12 | 24 | 48 | 72;
@@ -372,6 +397,8 @@ export function createMonitorStore(
       intentId: intent.id,
       kind: intent.kind,
       monitorId: monitor.id,
+      monitorName: monitor.name,
+      chainCheckId: intent.retry_of_check_id ?? Number(check.lastInsertRowid),
       scopeRevision: monitor.scope_revision,
       intervalHours: monitor.interval_hours,
       url: monitor.url,
@@ -438,6 +465,51 @@ export function createMonitorStore(
     WHERE monitor_id = ? AND state = 'queued' AND kind = 'retry'
     ORDER BY due_at, id LIMIT 1
   `);
+  const insertNotification = database.prepare(`
+    INSERT INTO notification_events (
+      kind, monitor_id, monitor_name, scope_revision, check_id, chain_check_id,
+      title, body, observed_at, target_path, dedupe_key
+    ) VALUES (@kind, @monitorId, @monitorName, @scopeRevision, @checkId, @chainCheckId,
+      @title, @body, @observedAt, @targetPath, @dedupeKey)
+  `);
+
+  function recordNotification(
+    claimed: Pick<ClaimedCheck, "monitorId" | "monitorName" | "scopeRevision" | "checkId" | "chainCheckId">,
+    completedAt: string,
+    event: Pick<NotificationEventRecord, "kind" | "title" | "body" | "targetPath" | "dedupeKey">,
+  ): void {
+    insertNotification.run({
+      ...event,
+      monitorId: claimed.monitorId,
+      monitorName: claimed.monitorName,
+      scopeRevision: claimed.scopeRevision,
+      checkId: claimed.checkId,
+      chainCheckId: claimed.chainCheckId,
+      observedAt: completedAt,
+    });
+  }
+
+  function recordChangeNotification(claimed: ClaimedCheck, completedAt: string): void {
+    recordNotification(claimed, completedAt, {
+      kind: "change_detected", title: "Обнаружено изменение",
+      body: `Монитор «${claimed.monitorName}»: страница изменилась.`,
+      targetPath: `/?section=notifications&check=${claimed.checkId}`,
+      dedupeKey: `change:${claimed.checkId}`,
+    });
+  }
+
+  function recordFinalErrorNotification(
+    claimed: Pick<ClaimedCheck, "monitorId" | "monitorName" | "scopeRevision" | "checkId" | "chainCheckId">,
+    completedAt: string,
+    errorMessage: string,
+  ): void {
+    recordNotification(claimed, completedAt, {
+      kind: "check_failed_final", title: "Проверка завершилась ошибкой",
+      body: `Монитор «${claimed.monitorName}»: ${errorMessage}`,
+      targetPath: `/?section=journal&check=${claimed.checkId}`,
+      dedupeKey: `final-error:${claimed.chainCheckId}`,
+    });
+  }
 
   function replaceOrdinarySchedule(
     claimed: ClaimedCheck,
@@ -563,12 +635,13 @@ export function createMonitorStore(
       );
       assertChanged(finishIntent.run(completedAt, claimed.intentId).changes);
       replaceOrdinarySchedule(claimed, completedAt, nextCheckAt);
+      recordChangeNotification(claimed, completedAt);
     },
   );
 
   function recordFailureTransition(
     identity: Pick<ClaimedCheck,
-      "checkId" | "intentId" | "kind" | "monitorId" | "scopeRevision">,
+      "checkId" | "intentId" | "kind" | "monitorId" | "monitorName" | "scopeRevision" | "chainCheckId">,
     error: { code: string; message: string },
     completedAt: string,
     nextCheckAt: string,
@@ -587,6 +660,7 @@ export function createMonitorStore(
       assertChanged(scheduleMonitor.run(
         nextCheckAt, completedAt, identity.monitorId, identity.scopeRevision,
       ).changes);
+      recordFinalErrorNotification(identity, completedAt, error.message);
       return;
     }
     const retryAt = new Date(new Date(completedAt).getTime() + 60_000).toISOString();
@@ -658,7 +732,7 @@ export function createMonitorStore(
   const recoverInterruptedTransaction = database.transaction((now: string) => {
     const rows = database.prepare(`
       SELECT i.id intent_id, i.kind, i.monitor_id, i.scope_revision,
-             c.id check_id, m.interval_hours
+             c.id check_id, m.name monitor_name, m.interval_hours, i.retry_of_check_id
       FROM check_intents i
       JOIN checks c ON c.intent_id = i.id AND c.status = 'running'
       JOIN monitors m ON m.id = i.monitor_id
@@ -667,6 +741,7 @@ export function createMonitorStore(
     `).all() as Array<{
       intent_id: number; kind: CheckIntentKind; monitor_id: number;
       scope_revision: number; check_id: number;
+      monitor_name: string; retry_of_check_id: number | null;
       interval_hours: 6 | 12 | 24 | 48 | 72;
     }>;
     for (const row of rows) {
@@ -679,6 +754,8 @@ export function createMonitorStore(
           intentId: row.intent_id,
           kind: row.kind,
           monitorId: row.monitor_id,
+          monitorName: row.monitor_name,
+          chainCheckId: row.retry_of_check_id ?? row.check_id,
           scopeRevision: row.scope_revision,
         },
         {
@@ -977,6 +1054,26 @@ export function createMonitorStore(
                 },
         })),
       };
+    },
+    listNotifications(afterId = 0) {
+      const high = database.prepare(`SELECT COALESCE(MAX(id), 0) high FROM notification_events`).get() as { high: number };
+      const rows = database.prepare(`
+        SELECT id, kind, monitor_id, monitor_name, scope_revision, check_id,
+          chain_check_id, title, body, observed_at, target_path, dedupe_key
+        FROM notification_events WHERE id > ? ORDER BY id
+      `).all(afterId) as Array<{
+        id: number; kind: NotificationEventRecord["kind"]; monitor_id: number;
+        monitor_name: string; scope_revision: number; check_id: number;
+        chain_check_id: number; title: string; body: string; observed_at: string;
+        target_path: string; dedupe_key: string;
+      }>;
+      return { highWaterMark: high.high, items: rows.map((row) => ({
+        id: row.id, kind: row.kind, monitorId: row.monitor_id,
+        monitorName: row.monitor_name, scopeRevision: row.scope_revision,
+        checkId: row.check_id, chainCheckId: row.chain_check_id,
+        title: row.title, body: row.body, observedAt: row.observed_at,
+        targetPath: row.target_path, dedupeKey: row.dedupe_key,
+      })) };
     },
   };
 }

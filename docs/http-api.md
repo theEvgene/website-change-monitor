@@ -189,6 +189,27 @@ Invoke-RestMethod -Uri "http://127.0.0.1:43117/api/checks/$($check.id)/compariso
 Invoke-WebRequest -Uri 'http://127.0.0.1:43117/openapi.json' -OutFile 'openapi.json'
 ```
 
+## Долговечные Уведомления и браузерная доставка
+
+Изменение и Окончательная ошибка создают неизменяемое Уведомление в той же SQLite-транзакции, что завершает Проверку. Первая ошибка с назначенной Повторной проверкой события не создаёт. Переименование Монитора позднее не меняет сохранённые русские `title`, `body` и имя Монитора.
+
+- `GET /api/notifications` возвращает текущий `highWaterMark` и все события;
+- `GET /api/notifications?after=17` возвращает только события с `id > 17`;
+- `GET /api/notifications/stream?after=17` с заголовком `Accept: text/event-stream` открывает SSE replay новых событий. При reconnect корректный `Last-Event-ID` имеет приоритет над query cursor. Catch-up приходит как `event: replay`, новые live-события — как `event: notification`, а неизвестный cursor выше текущего high-water получает `event: reset`. Каждое событие содержит JSON из REST-модели.
+
+Клиент сначала читает REST high-water mark и только затем подключает SSE. Доставка at least once означает, что клиент обязан удалять дубли по `id`/`dedupeKey`. REST-история, replay и reset обновляют центр без browser popup; только новое live-событие даёт toast в активной вкладке либо системное уведомление в фоновой вкладке, если пользователь сам разрешил Notification API.
+
+```powershell
+$feed = Invoke-RestMethod -Uri 'http://127.0.0.1:43117/api/notifications'
+$feed.items | Format-Table id, kind, monitorName, observedAt, targetPath
+```
+
+Для проверки SSE настоящим `curl.exe`:
+
+```powershell
+curl.exe --no-buffer --header "Accept: text/event-stream" "http://127.0.0.1:43117/api/notifications/stream?after=0"
+```
+
 ## Формат ответов
 
 Успешная операция возвращает описанный в OpenAPI типизированный JSON-объект. Например, `GET /api/version`:

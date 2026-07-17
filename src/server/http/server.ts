@@ -1,6 +1,7 @@
 import fastifyStatic from "@fastify/static";
 import fastifySwagger from "@fastify/swagger";
 import Fastify, { type FastifyInstance } from "fastify";
+import type { ServerResponse } from "node:http";
 
 import { PageProbeError, type PageProbe } from "../application/page-probe.js";
 import {
@@ -21,6 +22,8 @@ import {
   comparisonResponseSchemaV1,
   checkIntentSchemaV1,
   checkIntentListResponseSchemaV1,
+  notificationEventSchemaV1,
+  notificationFeedSchemaV1,
   createMonitorRouteSchema,
   getMonitorRouteSchema,
   getComparisonRouteSchema,
@@ -30,6 +33,8 @@ import {
   listJournalRouteSchema,
   listCheckIntentsRouteSchema,
   listMonitorsRouteSchema,
+  listNotificationsRouteSchema,
+  streamNotificationsRouteSchema,
   monitorCheckListResponseSchemaV1,
   monitorCheckSchemaV1,
   monitorCreateRequestSchemaV1,
@@ -76,6 +81,7 @@ export function buildHttpServer(
       : { orchestrationTimeoutMs: options.orchestrationTimeoutMs }),
   });
   let workerTimer: ReturnType<typeof setInterval> | undefined;
+  const notificationStreams = new Set<ServerResponse>();
 
   server.addHook("onReady", async () => {
     await monitors.runAvailableChecks();
@@ -87,6 +93,8 @@ export function buildHttpServer(
 
   server.addHook("onClose", async () => {
     if (workerTimer !== undefined) clearInterval(workerTimer);
+    for (const stream of notificationStreams) stream.end();
+    notificationStreams.clear();
     await monitors.stop(options.workerShutdownMs ?? 8_000);
   });
 
@@ -181,6 +189,8 @@ export function buildHttpServer(
     apiServer.addSchema(comparisonResponseSchemaV1);
     apiServer.addSchema(checkIntentSchemaV1);
     apiServer.addSchema(checkIntentListResponseSchemaV1);
+    apiServer.addSchema(notificationEventSchemaV1);
+    apiServer.addSchema(notificationFeedSchemaV1);
 
     apiServer.get("/api/health", { schema: healthRouteSchema }, async () => {
       const database = options.database.diagnostics();
@@ -399,6 +409,52 @@ export function buildHttpServer(
       "/api/check-intents",
       { schema: listCheckIntentsRouteSchema },
       async () => monitors.listActiveIntents(),
+    );
+
+    apiServer.get<{ Querystring: { after?: number } }>(
+      "/api/notifications", { schema: listNotificationsRouteSchema },
+      async (request) => monitors.listNotifications(request.query.after),
+    );
+
+    apiServer.get<{ Querystring: { after?: number } }>(
+      "/api/notifications/stream", { schema: streamNotificationsRouteSchema },
+      async (request, reply) => {
+        if (!request.headers.accept?.includes("text/event-stream")) {
+          return reply.code(400).send(apiError("invalid_request", "Для потока Уведомлений требуется Accept: text/event-stream."));
+        }
+        reply.hijack();
+        reply.raw.writeHead(200, {
+          "content-type": "text/event-stream; charset=utf-8",
+          "cache-control": "no-cache, no-transform",
+          connection: "keep-alive",
+          "x-accel-buffering": "no",
+        });
+        notificationStreams.add(reply.raw);
+        const lastEventId = Number(request.headers["last-event-id"]);
+        let cursor = Number.isSafeInteger(lastEventId) && lastEventId >= 0 ? lastEventId : (request.query.after ?? 0);
+        const initial = monitors.listNotifications(cursor);
+        if (cursor > initial.highWaterMark) {
+          const reset = monitors.listNotifications(0);
+          reply.raw.write(`event: reset\ndata: ${JSON.stringify(reset)}\n\n`);
+          cursor = reset.highWaterMark;
+        } else {
+          for (const event of initial.items) {
+            reply.raw.write(`id: ${event.id}\nevent: replay\ndata: ${JSON.stringify(event)}\n\n`);
+            cursor = event.id;
+          }
+        }
+        const flushLive = () => {
+          const feed = monitors.listNotifications(cursor);
+          for (const event of feed.items) {
+            reply.raw.write(`id: ${event.id}\nevent: notification\ndata: ${JSON.stringify(event)}\n\n`);
+            cursor = event.id;
+          }
+        };
+        const timer = setInterval(() => { flushLive(); reply.raw.write(": keep-alive\n\n"); }, 1_000);
+        timer.unref();
+        request.raw.on("close", () => { clearInterval(timer); notificationStreams.delete(reply.raw); });
+        return reply;
+      },
     );
 
     apiServer.get<{ Params: { checkId: number } }>(

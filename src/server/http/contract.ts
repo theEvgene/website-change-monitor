@@ -332,6 +332,27 @@ export const checkIntentListResponseSchemaV1 = {
   items: { $ref: "CheckIntentV1#" },
 } as const;
 
+export const notificationEventSchemaV1 = {
+  $id: "NotificationEventV1", type: "object", additionalProperties: false,
+  required: ["id", "kind", "monitorId", "monitorName", "scopeRevision", "checkId", "chainCheckId", "title", "body", "observedAt", "targetPath", "dedupeKey"],
+  properties: {
+    id: { type: "integer", minimum: 1 },
+    kind: { enum: ["change_detected", "check_failed_final"], type: "string" },
+    monitorId: { type: "integer", minimum: 1 }, monitorName: { type: "string" },
+    scopeRevision: { type: "integer", minimum: 1 }, checkId: { type: "integer", minimum: 1 },
+    chainCheckId: { type: "integer", minimum: 1 }, title: { type: "string" }, body: { type: "string" },
+    observedAt: { type: "string", format: "date-time" }, targetPath: { type: "string" }, dedupeKey: { type: "string" },
+  },
+} as const;
+
+export const notificationFeedSchemaV1 = {
+  $id: "NotificationFeedV1", type: "object", additionalProperties: false,
+  required: ["highWaterMark", "items"], properties: {
+    highWaterMark: { type: "integer", minimum: 0 },
+    items: { type: "array", items: { $ref: "NotificationEventV1#" } },
+  },
+} as const;
+
 const activeIntentSchema = {
   anyOf: [{ $ref: "CheckIntentV1#" }, { type: "null" }],
 } as const;
@@ -661,6 +682,20 @@ export const listCheckIntentsRouteSchema: FastifySchema = {
     200: { $ref: "CheckIntentListResponseV1#" },
     ...commonErrors,
   },
+};
+
+const notificationAfterQuery = { type: "object", additionalProperties: false, properties: { after: { type: "integer", minimum: 0 } } } as const;
+
+export const listNotificationsRouteSchema: FastifySchema = {
+  operationId: "listNotifications", summary: "Получить долговечные Уведомления после high-water mark",
+  querystring: notificationAfterQuery,
+  response: { 200: { $ref: "NotificationFeedV1#" }, ...commonErrors },
+};
+
+export const streamNotificationsRouteSchema: FastifySchema = {
+  operationId: "streamNotifications", summary: "Подключиться к потоку новых Уведомлений",
+  querystring: notificationAfterQuery,
+  response: { 200: { type: "string", description: "Server-Sent Events с id и JSON data" }, 400: { $ref: "ApiErrorV1#" }, ...commonErrors },
 };
 
 export const getComparisonRouteSchema: FastifySchema = {

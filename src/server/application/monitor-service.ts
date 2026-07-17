@@ -5,6 +5,7 @@ import type {
 } from "../persistence/database.js";
 import type {
   CreateMonitorRecord,
+  JournalCheckRecord,
   MonitorRecord,
   MonitorSummaryRecord,
 } from "../persistence/monitor-store.js";
@@ -15,6 +16,10 @@ import {
   previewPage,
   validatePreviewInput,
 } from "./preview-page.js";
+import {
+  compareSnapshots,
+  type SnapshotComparison,
+} from "./snapshot-comparison.js";
 
 export interface Clock {
   now(): Date;
@@ -59,6 +64,16 @@ export interface MonitorService {
   createMonitor(input: CreateMonitorInput): Promise<MonitorView>;
   requestManualCheck(id: number): Promise<MonitorView | undefined>;
   listMonitors(): MonitorSummary[];
+  listJournal(): JournalCheckRecord[];
+  getComparison(id: number):
+    | (SnapshotComparison & {
+        checkId: number;
+        monitorId: number;
+        monitorName: string;
+        beforeSnapshotId: number;
+        afterSnapshotId: number;
+      })
+    | undefined;
   getMonitor(id: number): MonitorView | undefined;
   runAvailableChecks(): Promise<void>;
 }
@@ -192,6 +207,23 @@ export function createMonitorService(options: {
       return options.database.monitors.getMonitor(id);
     },
     listMonitors: () => options.database.monitors.listMonitors(),
+    listJournal: () => options.database.monitors.listJournal(),
+    getComparison(id) {
+      const pair = options.database.monitors.getComparison(id);
+      if (pair === undefined) return undefined;
+      const comparison = compareSnapshots(
+        pair.beforeCanonicalJson,
+        pair.afterCanonicalJson,
+      );
+      return {
+        checkId: pair.checkId,
+        monitorId: pair.monitorId,
+        monitorName: pair.monitorName,
+        beforeSnapshotId: pair.beforeSnapshotId,
+        afterSnapshotId: pair.afterSnapshotId,
+        ...comparison,
+      };
+    },
     getMonitor: (id) => options.database.monitors.getMonitor(id),
     runAvailableChecks,
   };

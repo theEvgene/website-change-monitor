@@ -15,11 +15,14 @@ import {
   apiErrorSchemaV1,
   apiVersion,
   applicationId,
+  comparisonResponseSchemaV1,
   createMonitorRouteSchema,
   getMonitorRouteSchema,
+  getComparisonRouteSchema,
   healthResponseSchemaV1,
   healthRouteSchema,
   listMonitorChecksRouteSchema,
+  listJournalRouteSchema,
   listMonitorsRouteSchema,
   monitorCheckListResponseSchemaV1,
   monitorCheckSchemaV1,
@@ -27,6 +30,8 @@ import {
   monitorDetailSchemaV1,
   monitorListResponseSchemaV1,
   monitorSummarySchemaV1,
+  journalCheckSchemaV1,
+  journalResponseSchemaV1,
   previewRequestSchemaV1,
   previewResponseSchemaV1,
   previewRouteSchema,
@@ -141,6 +146,9 @@ export function buildHttpServer(
     apiServer.addSchema(monitorListResponseSchemaV1);
     apiServer.addSchema(monitorDetailSchemaV1);
     apiServer.addSchema(monitorCheckListResponseSchemaV1);
+    apiServer.addSchema(journalCheckSchemaV1);
+    apiServer.addSchema(journalResponseSchemaV1);
+    apiServer.addSchema(comparisonResponseSchemaV1);
 
     apiServer.get("/api/health", { schema: healthRouteSchema }, async () => {
       const database = options.database.diagnostics();
@@ -293,6 +301,26 @@ export function buildHttpServer(
             .send(apiError("not_found", "Монитор не найден."));
         }
         return publicMonitor(monitor);
+      },
+    );
+
+    apiServer.get(
+      "/api/checks",
+      { schema: listJournalRouteSchema },
+      async () => monitors.listJournal(),
+    );
+
+    apiServer.get<{ Params: { checkId: number } }>(
+      "/api/checks/:checkId/comparison",
+      { schema: getComparisonRouteSchema },
+      async (request, reply) => {
+        const comparison = monitors.getComparison(request.params.checkId);
+        if (comparison === undefined) {
+          return reply
+            .code(404)
+            .send(apiError("not_found", "Сравнение для Проверки не найдено."));
+        }
+        return comparison;
       },
     );
 

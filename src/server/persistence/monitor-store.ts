@@ -67,6 +67,31 @@ export interface MonitorSummaryRecord {
   latestCheckResult: CheckResult | null;
 }
 
+export interface JournalCheckRecord {
+  id: number;
+  monitorId: number;
+  monitorName: string;
+  kind: CheckIntentKind;
+  status: CheckStatus;
+  result: CheckResult | null;
+  startedAt: string;
+  completedAt: string | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+  beforeSnapshotId: number | null;
+  afterSnapshotId: number | null;
+}
+
+export interface ComparisonSnapshotPair {
+  checkId: number;
+  monitorId: number;
+  monitorName: string;
+  beforeSnapshotId: number;
+  afterSnapshotId: number;
+  beforeCanonicalJson: string;
+  afterCanonicalJson: string;
+}
+
 export interface MonitorStore {
   createMonitor(input: CreateMonitorRecord, now: string): number;
   enqueueManualCheck(monitorId: number, now: string): boolean | undefined;
@@ -95,6 +120,8 @@ export interface MonitorStore {
     nextCheckAt: string,
   ): void;
   listMonitors(): MonitorSummaryRecord[];
+  listJournal(): JournalCheckRecord[];
+  getComparison(checkId: number): ComparisonSnapshotPair | undefined;
   getMonitor(id: number): MonitorRecord | undefined;
 }
 
@@ -480,6 +507,82 @@ export function createMonitorStore(
         nextCheckAt: row.next_check_at,
         latestCheckResult: row.latest_result,
       }));
+    },
+    listJournal() {
+      const rows = database
+        .prepare(`
+          SELECT c.id, c.monitor_id, m.name monitor_name, c.kind, c.status,
+                 c.result, c.started_at, c.completed_at, c.error_code,
+                 c.error_message, c.before_snapshot_id, c.after_snapshot_id
+          FROM checks c
+          JOIN monitors m ON m.id = c.monitor_id
+          ORDER BY c.id DESC
+        `)
+        .all() as Array<{
+        id: number;
+        monitor_id: number;
+        monitor_name: string;
+        kind: CheckIntentKind;
+        status: CheckStatus;
+        result: CheckResult | null;
+        started_at: string;
+        completed_at: string | null;
+        error_code: string | null;
+        error_message: string | null;
+        before_snapshot_id: number | null;
+        after_snapshot_id: number | null;
+      }>;
+      return rows.map((row) => ({
+        id: row.id,
+        monitorId: row.monitor_id,
+        monitorName: row.monitor_name,
+        kind: row.kind,
+        status: row.status,
+        result: row.result,
+        startedAt: row.started_at,
+        completedAt: row.completed_at,
+        errorCode: row.error_code,
+        errorMessage: row.error_message,
+        beforeSnapshotId: row.before_snapshot_id,
+        afterSnapshotId: row.after_snapshot_id,
+      }));
+    },
+    getComparison(checkId) {
+      const row = database
+        .prepare(`
+          SELECT c.id check_id, c.monitor_id, m.name monitor_name,
+                 before_snapshot.id before_snapshot_id,
+                 after_snapshot.id after_snapshot_id,
+                 before_snapshot.canonical_json before_json,
+                 after_snapshot.canonical_json after_json
+          FROM checks c
+          JOIN monitors m ON m.id = c.monitor_id
+          JOIN snapshots before_snapshot ON before_snapshot.id = c.before_snapshot_id
+          JOIN snapshots after_snapshot ON after_snapshot.id = c.after_snapshot_id
+          WHERE c.id = ?
+        `)
+        .get(checkId) as
+        | {
+            check_id: number;
+            monitor_id: number;
+            monitor_name: string;
+            before_snapshot_id: number;
+            after_snapshot_id: number;
+            before_json: Buffer;
+            after_json: Buffer;
+          }
+        | undefined;
+      return row === undefined
+        ? undefined
+        : {
+            checkId: row.check_id,
+            monitorId: row.monitor_id,
+            monitorName: row.monitor_name,
+            beforeSnapshotId: row.before_snapshot_id,
+            afterSnapshotId: row.after_snapshot_id,
+            beforeCanonicalJson: row.before_json.toString("utf8"),
+            afterCanonicalJson: row.after_json.toString("utf8"),
+          };
     },
     getMonitor(id) {
       const row = database

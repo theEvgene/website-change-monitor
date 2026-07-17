@@ -144,6 +144,49 @@ describe("Monitors HTTP API", () => {
         { result: "baseline" },
       ],
     });
+    const changedCheckId = checked.json<{ history: Array<{ id: number }> }>()
+      .history[0]!.id;
+
+    const journal = await server.inject({
+      method: "GET",
+      url: "/api/checks",
+      headers: { host: "127.0.0.1:43117" },
+    });
+    expect(journal.statusCode).toBe(200);
+    expect(journal.json()).toEqual([
+      expect.objectContaining({
+        id: changedCheckId,
+        monitorId,
+        monitorName: "Catalog",
+        kind: "manual",
+        result: "change",
+      }),
+      expect.objectContaining({
+        monitorId,
+        result: "baseline",
+      }),
+    ]);
+
+    const comparison = await server.inject({
+      method: "GET",
+      url: `/api/checks/${changedCheckId}/comparison`,
+      headers: { host: "127.0.0.1:43117" },
+    });
+    expect(comparison.statusCode).toBe(200);
+    expect(comparison.json()).toMatchObject({
+      checkId: changedCheckId,
+      monitorId,
+      monitorName: "Catalog",
+      complete: true,
+      targets: [
+        {
+          kind: "replace",
+          text: [
+            { kind: "replace", before: "Product A", after: "Product B" },
+          ],
+        },
+      ],
+    });
 
     const unchanged = await server.inject({
       method: "POST",

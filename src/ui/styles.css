@@ -38,6 +38,29 @@ input {
   border-bottom: 3px solid #2e73d2;
 }
 
+.top-navigation {
+  display: flex;
+  gap: 4px;
+  padding: 0 clamp(24px, 5vw, 72px);
+  background: #fff;
+  border-bottom: 1px solid #dce2ea;
+}
+
+.top-navigation button {
+  padding: 14px 16px 12px;
+  color: #46566c;
+  font-weight: 700;
+  background: transparent;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  cursor: pointer;
+}
+
+.top-navigation button[aria-current="page"] {
+  color: #2257a8;
+  border-bottom-color: #2e73d2;
+}
+
 .topbar h1,
 .status-panel h2,
 .component-card h3,
@@ -263,11 +286,97 @@ main {
 }
 
 .monitors-table-panel,
-.monitor-history {
+.monitor-history,
+.journal-panel {
   padding: 20px;
   background: #fff;
   border: 1px solid #e0e6ee;
   border-radius: 8px;
+}
+
+.journal-panel > h2 {
+  margin: 6px 0 20px;
+}
+
+.comparison-backdrop {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 3vh 3vw;
+  background: rgb(15 23 42 / 66%);
+}
+
+.comparison-dialog {
+  width: min(1500px, 94vw);
+  height: 94vh;
+  padding: 24px;
+  overflow: auto;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 25px 70px rgb(0 0 0 / 30%);
+}
+
+.comparison-header,
+.comparison-column-headings,
+.diff-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.comparison-header {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  position: sticky;
+  top: -24px;
+  z-index: 2;
+  padding: 8px 0 16px;
+  background: #fff;
+  border-bottom: 1px solid #dce2ea;
+}
+
+.comparison-header h2 { margin: 4px 0 0; }
+
+.comparison-column-headings {
+  position: sticky;
+  top: 65px;
+  z-index: 1;
+  padding: 12px 0;
+  background: #fff;
+}
+
+.comparison-target {
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid #dce2ea;
+  border-radius: 8px;
+}
+
+.comparison-target h3,
+.diff-section h4 { margin: 0 0 8px; }
+.diff-section + .diff-section { margin-top: 16px; }
+
+.diff-row pre {
+  min-height: 32px;
+  margin: 0;
+  padding: 7px 9px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  background: #f5f7fa;
+  border-radius: 4px;
+}
+
+.diff-before { color: #7f1d1d; background: #fee2e2 !important; }
+.diff-after { color: #14532d; background: #dcfce7 !important; }
+.diff-omitted,
+.comparison-limited {
+  padding: 10px;
+  color: #805000;
+  background: #fff1c9;
+  border: 1px solid #f1d588;
+  border-radius: 5px;
 }
 
 .dense-table {

@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 
+import { ComparisonModal, type ComparisonResponse } from "./ComparisonModal.js";
+
 interface MonitorSummary {
   id: number;
   name: string;
@@ -18,6 +20,8 @@ interface MonitorCheck {
   startedAt: string;
   completedAt: string | null;
   errorMessage: string | null;
+  beforeSnapshotId: number | null;
+  afterSnapshotId: number | null;
 }
 
 interface MonitorDetail extends MonitorSummary {
@@ -31,6 +35,7 @@ export function MonitorsWorkspace({ refreshToken }: { refreshToken: number }) {
   const [selected, setSelected] = useState<MonitorDetail | null>(null);
   const [manualBusy, setManualBusy] = useState(false);
   const [manualError, setManualError] = useState<string | null>(null);
+  const [comparison, setComparison] = useState<ComparisonResponse | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -112,14 +117,27 @@ export function MonitorsWorkspace({ refreshToken }: { refreshToken: number }) {
                   <strong>{checkLabel(check)}</strong>
                   <span>{formatDate(check.completedAt ?? check.startedAt)}</span>
                   {check.errorMessage === null ? null : <small>{check.errorMessage}</small>}
+                  {check.beforeSnapshotId !== null && check.afterSnapshotId !== null && check.beforeSnapshotId !== check.afterSnapshotId ? (
+                    <button className="table-link" type="button" onClick={() => void openComparison(check.id)}>
+                      Открыть Сравнение
+                    </button>
+                  ) : null}
                 </li>
               ))}
             </ol>
           </>
         )}
       </aside>
+      {comparison === null ? null : <ComparisonModal comparison={comparison} onClose={() => setComparison(null)} />}
     </section>
   );
+
+  async function openComparison(checkId: number) {
+    const response = await fetch(`/api/checks/${checkId}/comparison`, {
+      headers: { accept: "application/json" },
+    });
+    if (response.ok) setComparison((await response.json()) as ComparisonResponse);
+  }
 
   async function requestManualCheck(id: number) {
     setManualBusy(true);

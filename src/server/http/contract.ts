@@ -357,6 +357,87 @@ export const monitorCheckListResponseSchemaV1 = {
   items: { $ref: "MonitorCheckV1#" },
 } as const;
 
+export const journalCheckSchemaV1 = {
+  $id: "JournalCheckV1",
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "id", "monitorId", "monitorName", "kind", "status", "result",
+    "startedAt", "completedAt", "errorCode", "errorMessage",
+    "beforeSnapshotId", "afterSnapshotId",
+  ],
+  properties: {
+    id: checkProperties.id,
+    monitorId: { type: "integer", minimum: 1 },
+    monitorName: { type: "string" },
+    kind: checkProperties.kind,
+    status: checkProperties.status,
+    result: checkProperties.result,
+    startedAt: checkProperties.startedAt,
+    completedAt: checkProperties.completedAt,
+    errorCode: checkProperties.errorCode,
+    errorMessage: checkProperties.errorMessage,
+    beforeSnapshotId: checkProperties.beforeSnapshotId,
+    afterSnapshotId: checkProperties.afterSnapshotId,
+  },
+} as const;
+
+export const journalResponseSchemaV1 = {
+  $id: "JournalResponseV1",
+  type: "array",
+  items: { $ref: "JournalCheckV1#" },
+} as const;
+
+const diffRowSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["kind", "before", "after"],
+  properties: {
+    kind: {
+      enum: ["equal", "replace", "delete", "insert", "omitted"],
+      type: "string",
+    },
+    before: { type: ["string", "null"] },
+    after: { type: ["string", "null"] },
+    omittedBefore: { type: "integer", minimum: 0 },
+    omittedAfter: { type: "integer", minimum: 0 },
+  },
+} as const;
+
+export const comparisonResponseSchemaV1 = {
+  $id: "ComparisonResponseV1",
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "checkId", "monitorId", "monitorName", "beforeSnapshotId",
+    "afterSnapshotId", "complete", "targets",
+  ],
+  properties: {
+    checkId: { type: "integer", minimum: 1 },
+    monitorId: { type: "integer", minimum: 1 },
+    monitorName: { type: "string" },
+    beforeSnapshotId: { type: "integer", minimum: 1 },
+    afterSnapshotId: { type: "integer", minimum: 1 },
+    complete: { type: "boolean" },
+    targets: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["kind", "structure", "text"],
+        properties: {
+          kind: {
+            enum: ["equal", "replace", "delete", "insert"],
+            type: "string",
+          },
+          structure: { type: "array", items: diffRowSchema },
+          text: { type: "array", items: diffRowSchema },
+        },
+      },
+    },
+  },
+} as const;
+
 const commonErrors = {
   403: { $ref: "ApiErrorV1#" },
   421: { $ref: "ApiErrorV1#" },
@@ -402,6 +483,13 @@ const monitorIdParams = {
   properties: {
     monitorId: { type: "integer", minimum: 1 },
   },
+} as const;
+
+const checkIdParams = {
+  type: "object",
+  additionalProperties: false,
+  required: ["checkId"],
+  properties: { checkId: { type: "integer", minimum: 1 } },
 } as const;
 
 export const createMonitorRouteSchema: FastifySchema = {
@@ -455,6 +543,26 @@ export const requestManualCheckRouteSchema: FastifySchema = {
   params: monitorIdParams,
   response: {
     200: { $ref: "MonitorDetailV1#" },
+    404: { $ref: "ApiErrorV1#" },
+    ...commonErrors,
+  },
+};
+
+export const listJournalRouteSchema: FastifySchema = {
+  operationId: "listJournal",
+  summary: "Получить общий Журнал Проверок",
+  response: {
+    200: { $ref: "JournalResponseV1#" },
+    ...commonErrors,
+  },
+};
+
+export const getComparisonRouteSchema: FastifySchema = {
+  operationId: "getComparison",
+  summary: "Получить Сравнение пары Снимков Проверки",
+  params: checkIdParams,
+  response: {
+    200: { $ref: "ComparisonResponseV1#" },
     404: { $ref: "ApiErrorV1#" },
     ...commonErrors,
   },

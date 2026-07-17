@@ -253,6 +253,8 @@ const checkProperties = {
   completedAt: { type: ["string", "null"], format: "date-time" },
   errorCode: { type: ["string", "null"] },
   errorMessage: { type: ["string", "null"] },
+  beforeSnapshotId: { type: ["integer", "null"], minimum: 1 },
+  afterSnapshotId: { type: ["integer", "null"], minimum: 1 },
   snapshot: {
     anyOf: [
       {
@@ -279,6 +281,8 @@ export const monitorCheckSchemaV1 = {
     "completedAt",
     "errorCode",
     "errorMessage",
+    "beforeSnapshotId",
+    "afterSnapshotId",
     "snapshot",
   ],
   properties: checkProperties,
@@ -440,6 +444,17 @@ export const listMonitorChecksRouteSchema: FastifySchema = {
   params: monitorIdParams,
   response: {
     200: { $ref: "MonitorCheckListResponseV1#" },
+    404: { $ref: "ApiErrorV1#" },
+    ...commonErrors,
+  },
+};
+
+export const requestManualCheckRouteSchema: FastifySchema = {
+  operationId: "requestManualCheck",
+  summary: "Запустить Ручную проверку Монитора",
+  params: monitorIdParams,
+  response: {
+    200: { $ref: "MonitorDetailV1#" },
     404: { $ref: "ApiErrorV1#" },
     ...commonErrors,
   },

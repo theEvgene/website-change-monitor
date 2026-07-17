@@ -27,6 +27,8 @@ interface MonitorDetail extends MonitorSummary {
 export function MonitorsWorkspace({ refreshToken }: { refreshToken: number }) {
   const [monitors, setMonitors] = useState<MonitorSummary[]>([]);
   const [selected, setSelected] = useState<MonitorDetail | null>(null);
+  const [manualBusy, setManualBusy] = useState(false);
+  const [manualError, setManualError] = useState<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -87,6 +89,17 @@ export function MonitorsWorkspace({ refreshToken }: { refreshToken: number }) {
           <>
             <h2>{selected.name}</h2>
             <p className="monitor-next-check">Следующая Проверка: {formatDate(selected.nextCheckAt)}</p>
+            <button
+              className="secondary-button"
+              type="button"
+              disabled={manualBusy}
+              onClick={() => void requestManualCheck(selected.id)}
+            >
+              {manualBusy ? "Проверка выполняется…" : "Запустить сейчас"}
+            </button>
+            {manualError === null ? null : (
+              <p className="form-error" role="alert">{manualError}</p>
+            )}
             <dl className="monitor-settings">
               <div><dt>URL</dt><dd>{selected.url}</dd></div>
               <div><dt>Область наблюдения</dt><dd>ревизия {selected.scopeRevision}</dd></div>
@@ -105,6 +118,37 @@ export function MonitorsWorkspace({ refreshToken }: { refreshToken: number }) {
       </aside>
     </section>
   );
+
+  async function requestManualCheck(id: number) {
+    setManualBusy(true);
+    setManualError(null);
+    try {
+      const response = await fetch(`/api/monitors/${id}/checks`, {
+        method: "POST",
+        headers: { accept: "application/json" },
+      });
+      if (!response.ok) {
+        throw new Error(`Manual Check failed: ${response.status}`);
+      }
+      const monitor = (await response.json()) as MonitorDetail;
+      setSelected(monitor);
+      setMonitors((items) =>
+        items.map((item) =>
+          item.id === monitor.id
+            ? {
+                ...item,
+                nextCheckAt: monitor.nextCheckAt,
+                latestCheckResult: monitor.history[0]?.result ?? null,
+              }
+            : item,
+        ),
+      );
+    } catch {
+      setManualError("Не удалось выполнить Ручную проверку.");
+    } finally {
+      setManualBusy(false);
+    }
+  }
 }
 
 async function loadMonitor(id: number, signal: AbortSignal | undefined, update: (monitor: MonitorDetail | null) => void) {

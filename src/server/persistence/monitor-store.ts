@@ -22,6 +22,7 @@ export interface ClaimedCheck {
   url: string;
   targetSelectors: string[];
   exclusionSelectors: string[];
+  currentSnapshot: (SnapshotRecord & { id: number }) | null;
 }
 
 export interface SnapshotRecord {
@@ -39,6 +40,8 @@ export interface MonitorCheckRecord {
   completedAt: string | null;
   errorCode: string | null;
   errorMessage: string | null;
+  beforeSnapshotId: number | null;
+  afterSnapshotId: number | null;
   snapshot: (SnapshotRecord & { id: number }) | null;
 }
 
@@ -66,8 +69,20 @@ export interface MonitorSummaryRecord {
 
 export interface MonitorStore {
   createMonitor(input: CreateMonitorRecord, now: string): number;
+  enqueueManualCheck(monitorId: number, now: string): boolean | undefined;
   claimNextCheck(now: string): ClaimedCheck | undefined;
   completeBaseline(
+    claimed: ClaimedCheck,
+    snapshot: SnapshotRecord,
+    completedAt: string,
+    nextCheckAt: string,
+  ): void;
+  completeNoChange(
+    claimed: ClaimedCheck,
+    completedAt: string,
+    nextCheckAt: string,
+  ): void;
+  completeChange(
     claimed: ClaimedCheck,
     snapshot: SnapshotRecord,
     completedAt: string,
@@ -119,11 +134,45 @@ export function createMonitorStore(
     },
   );
 
+  const selectMonitorRevision = database.prepare(`
+    SELECT scope_revision FROM monitors WHERE id = ?
+  `);
+  const selectActiveIntent = database.prepare(`
+    SELECT id FROM check_intents
+    WHERE monitor_id = ? AND state IN ('queued', 'running')
+    LIMIT 1
+  `);
+  const insertManualIntent = database.prepare(`
+    INSERT INTO check_intents (
+      monitor_id, scope_revision, kind, state, due_at, created_at
+    ) VALUES (?, ?, 'manual', 'queued', ?, ?)
+  `);
+  const enqueueManualTransaction = database.transaction(
+    (monitorId: number, now: string): boolean | undefined => {
+      const monitor = selectMonitorRevision.get(monitorId) as
+        | { scope_revision: number }
+        | undefined;
+      if (monitor === undefined) {
+        return undefined;
+      }
+      if (selectActiveIntent.get(monitorId) !== undefined) {
+        return false;
+      }
+      insertManualIntent.run(monitorId, monitor.scope_revision, now, now);
+      return true;
+    },
+  );
+
   const selectNextIntent = database.prepare(`
     SELECT id, monitor_id, scope_revision, kind
     FROM check_intents
     WHERE state = 'queued' AND due_at <= ?
-    ORDER BY due_at, id
+    ORDER BY CASE kind
+      WHEN 'manual' THEN 0
+      WHEN 'retry' THEN 1
+      WHEN 'overdue' THEN 2
+      ELSE 3
+    END, due_at, id
     LIMIT 1
   `);
   const markIntentRunning = database.prepare(`
@@ -137,9 +186,13 @@ export function createMonitorStore(
     ) VALUES (?, ?, ?, ?, 'running', ?)
   `);
   const selectMonitorForCheck = database.prepare(`
-    SELECT id, url, scope_revision, interval_hours
+    SELECT id, url, scope_revision, interval_hours, current_snapshot_id
     FROM monitors
     WHERE id = ?
+  `);
+  const selectSnapshot = database.prepare(`
+    SELECT id, format_version, sha256, canonical_json
+    FROM snapshots WHERE id = ?
   `);
   const selectTargets = database.prepare(`
     SELECT selector FROM monitor_target_selectors
@@ -177,7 +230,19 @@ export function createMonitorStore(
       url: string;
       scope_revision: number;
       interval_hours: 6 | 12 | 24 | 48 | 72;
+      current_snapshot_id: number | null;
     };
+    const snapshot =
+      monitor.current_snapshot_id === null
+        ? undefined
+        : (selectSnapshot.get(monitor.current_snapshot_id) as
+            | {
+                id: number;
+                format_version: number;
+                sha256: string;
+                canonical_json: Buffer;
+              }
+            | undefined);
     return {
       checkId: Number(check.lastInsertRowid),
       intentId: intent.id,
@@ -188,6 +253,15 @@ export function createMonitorStore(
       url: monitor.url,
       targetSelectors: selectorValues(selectTargets.all(monitor.id)),
       exclusionSelectors: selectorValues(selectExclusions.all(monitor.id)),
+      currentSnapshot:
+        snapshot === undefined
+          ? null
+          : {
+              id: snapshot.id,
+              formatVersion: snapshot.format_version,
+              sha256: snapshot.sha256,
+              canonicalJson: snapshot.canonical_json.toString("utf8"),
+            },
     } satisfies ClaimedCheck;
   });
 
@@ -197,9 +271,10 @@ export function createMonitorStore(
       canonical_json, sha256, created_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
-  const finishCheck = database.prepare(`
+  const succeedCheck = database.prepare(`
     UPDATE checks
-    SET status = 'succeeded', result = 'baseline', completed_at = ?
+    SET status = 'succeeded', result = ?, before_snapshot_id = ?,
+        after_snapshot_id = ?, completed_at = ?
     WHERE id = ? AND status = 'running'
   `);
   const failCheckStatement = database.prepare(`
@@ -218,6 +293,10 @@ export function createMonitorStore(
     SET next_check_at = ?, updated_at = ?
     WHERE id = ? AND scope_revision = ?
   `);
+  const setCurrentSnapshot = database.prepare(`
+    UPDATE monitors SET current_snapshot_id = ?
+    WHERE id = ? AND scope_revision = ?
+  `);
 
   const completeBaselineTransaction = database.transaction(
     (
@@ -226,7 +305,7 @@ export function createMonitorStore(
       completedAt: string,
       nextCheckAt: string,
     ) => {
-      insertSnapshot.run(
+      const inserted = insertSnapshot.run(
         claimed.monitorId,
         claimed.scopeRevision,
         claimed.checkId,
@@ -235,7 +314,97 @@ export function createMonitorStore(
         snapshot.sha256,
         completedAt,
       );
-      assertChanged(finishCheck.run(completedAt, claimed.checkId).changes);
+      const snapshotId = Number(inserted.lastInsertRowid);
+      assertChanged(
+        succeedCheck.run(
+          "baseline",
+          null,
+          snapshotId,
+          completedAt,
+          claimed.checkId,
+        ).changes,
+      );
+      assertChanged(
+        setCurrentSnapshot.run(
+          snapshotId,
+          claimed.monitorId,
+          claimed.scopeRevision,
+        ).changes,
+      );
+      assertChanged(finishIntent.run(completedAt, claimed.intentId).changes);
+      assertChanged(
+        scheduleMonitor.run(
+          nextCheckAt,
+          completedAt,
+          claimed.monitorId,
+          claimed.scopeRevision,
+        ).changes,
+      );
+    },
+  );
+
+  const completeNoChangeTransaction = database.transaction(
+    (claimed: ClaimedCheck, completedAt: string, nextCheckAt: string) => {
+      if (claimed.currentSnapshot === null) {
+        throw new Error("No current Snapshot for no-change result");
+      }
+      assertChanged(
+        succeedCheck.run(
+          "no_change",
+          claimed.currentSnapshot.id,
+          claimed.currentSnapshot.id,
+          completedAt,
+          claimed.checkId,
+        ).changes,
+      );
+      assertChanged(finishIntent.run(completedAt, claimed.intentId).changes);
+      assertChanged(
+        scheduleMonitor.run(
+          nextCheckAt,
+          completedAt,
+          claimed.monitorId,
+          claimed.scopeRevision,
+        ).changes,
+      );
+    },
+  );
+
+  const completeChangeTransaction = database.transaction(
+    (
+      claimed: ClaimedCheck,
+      snapshot: SnapshotRecord,
+      completedAt: string,
+      nextCheckAt: string,
+    ) => {
+      if (claimed.currentSnapshot === null) {
+        throw new Error("No current Snapshot for Change result");
+      }
+      const inserted = insertSnapshot.run(
+        claimed.monitorId,
+        claimed.scopeRevision,
+        claimed.checkId,
+        snapshot.formatVersion,
+        Buffer.from(snapshot.canonicalJson, "utf8"),
+        snapshot.sha256,
+        completedAt,
+      );
+      const snapshotId = Number(inserted.lastInsertRowid);
+      assertChanged(
+        succeedCheck.run(
+          "change",
+          claimed.currentSnapshot.id,
+          snapshotId,
+          completedAt,
+          claimed.checkId,
+        ).changes,
+      );
+      assertChanged(
+        setCurrentSnapshot.run(
+          snapshotId,
+          claimed.monitorId,
+          claimed.scopeRevision,
+        ).changes,
+      );
       assertChanged(finishIntent.run(completedAt, claimed.intentId).changes);
       assertChanged(
         scheduleMonitor.run(
@@ -277,8 +446,11 @@ export function createMonitorStore(
 
   return {
     createMonitor: createMonitorTransaction,
+    enqueueManualCheck: enqueueManualTransaction,
     claimNextCheck: claimTransaction,
     completeBaseline: completeBaselineTransaction,
+    completeNoChange: completeNoChangeTransaction,
+    completeChange: completeChangeTransaction,
     failCheck: failCheckTransaction,
     listMonitors() {
       const rows = database
@@ -332,6 +504,7 @@ export function createMonitorStore(
         .prepare(`
           SELECT c.id, c.kind, c.status, c.result, c.started_at,
                  c.completed_at, c.error_code, c.error_message,
+                 c.before_snapshot_id, c.after_snapshot_id,
                  s.id snapshot_id, s.format_version, s.sha256, s.canonical_json
           FROM checks c
           LEFT JOIN snapshots s ON s.check_id = c.id
@@ -347,6 +520,8 @@ export function createMonitorStore(
         completed_at: string | null;
         error_code: string | null;
         error_message: string | null;
+        before_snapshot_id: number | null;
+        after_snapshot_id: number | null;
         snapshot_id: number | null;
         format_version: number | null;
         sha256: string | null;
@@ -370,6 +545,8 @@ export function createMonitorStore(
           completedAt: check.completed_at,
           errorCode: check.error_code,
           errorMessage: check.error_message,
+          beforeSnapshotId: check.before_snapshot_id,
+          afterSnapshotId: check.after_snapshot_id,
           snapshot:
             check.snapshot_id === null ||
             check.format_version === null ||

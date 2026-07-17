@@ -5,6 +5,7 @@ import BetterSqlite3 from "better-sqlite3";
 
 import { initialMigration } from "./migrations/001-initial.js";
 import { monitorsMigration } from "./migrations/002-monitors.js";
+import { manualChecksMigration } from "./migrations/003-manual-checks.js";
 import { createMonitorStore, type MonitorStore } from "./monitor-store.js";
 
 export interface DatabaseDiagnostics {
@@ -33,7 +34,7 @@ export interface DatabaseInspection {
   telegramExecutablePath: string | null;
 }
 
-const migrations = [initialMigration, monitorsMigration];
+const migrations = [initialMigration, monitorsMigration, manualChecksMigration];
 
 export function openApplicationDatabase(
   options: OpenApplicationDatabaseOptions,

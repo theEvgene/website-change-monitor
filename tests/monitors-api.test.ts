@@ -92,4 +92,75 @@ describe("Monitors HTTP API", () => {
     expect(checksResponse.statusCode).toBe(200);
     expect(checksResponse.json()).toEqual(created.history);
   });
+
+  it("runs a manual Check through the documented Monitor API", async () => {
+    const baseline = successfulPageProbeResult(
+      "https://example.com/catalog",
+      [{ selector: ".card", matchCount: 1 }],
+      simplePagePreviewTargets("Product A"),
+    );
+    const changed = successfulPageProbeResult(
+      "https://example.com/catalog",
+      [{ selector: ".card", matchCount: 1 }],
+      simplePagePreviewTargets("Product B"),
+    );
+    const preview = vi
+      .fn<PageProbe["preview"]>()
+      .mockResolvedValueOnce(baseline)
+      .mockResolvedValueOnce(baseline)
+      .mockResolvedValueOnce(changed)
+      .mockResolvedValueOnce(changed);
+    const server = await context.applicationServer({ pageProbe: { preview } });
+    const created = await server.inject({
+      method: "POST",
+      url: "/api/monitors",
+      headers: { host: "127.0.0.1:43117" },
+      payload: {
+        name: "Catalog",
+        url: "https://example.com/catalog",
+        targetSelectors: [".card"],
+        exclusionSelectors: [],
+        intervalHours: 12,
+      },
+    });
+    const monitorId = created.json<{ id: number }>().id;
+
+    const checked = await server.inject({
+      method: "POST",
+      url: `/api/monitors/${monitorId}/checks`,
+      headers: { host: "127.0.0.1:43117" },
+    });
+
+    expect(checked.statusCode).toBe(200);
+    expect(checked.json()).toMatchObject({
+      id: monitorId,
+      history: [
+        {
+          kind: "manual",
+          result: "change",
+          beforeSnapshotId: expect.any(Number),
+          afterSnapshotId: expect.any(Number),
+        },
+        { result: "baseline" },
+      ],
+    });
+
+    const unchanged = await server.inject({
+      method: "POST",
+      url: `/api/monitors/${monitorId}/checks`,
+      headers: { host: "127.0.0.1:43117" },
+    });
+    expect(unchanged.statusCode).toBe(200);
+    expect(unchanged.json()).toMatchObject({
+      history: [
+        {
+          kind: "manual",
+          result: "no_change",
+          snapshot: null,
+        },
+        { result: "change" },
+        { result: "baseline" },
+      ],
+    });
+  });
 });

@@ -30,6 +30,7 @@ import {
   previewRequestSchemaV1,
   previewResponseSchemaV1,
   previewRouteSchema,
+  requestManualCheckRouteSchema,
   versionResponseSchemaV1,
   versionRouteSchema,
 } from "./contract.js";
@@ -276,6 +277,22 @@ export function buildHttpServer(
             .send(apiError("not_found", "Монитор не найден."));
         }
         return publicMonitor(monitor).history;
+      },
+    );
+
+    apiServer.post<{ Params: { monitorId: number } }>(
+      "/api/monitors/:monitorId/checks",
+      { schema: requestManualCheckRouteSchema },
+      async (request, reply) => {
+        const monitor = await monitors.requestManualCheck(
+          request.params.monitorId,
+        );
+        if (monitor === undefined) {
+          return reply
+            .code(404)
+            .send(apiError("not_found", "Монитор не найден."));
+        }
+        return publicMonitor(monitor);
       },
     );
 

@@ -57,6 +57,7 @@ export class SnapshotError extends Error {
 
 export interface MonitorService {
   createMonitor(input: CreateMonitorInput): Promise<MonitorView>;
+  requestManualCheck(id: number): Promise<MonitorView | undefined>;
   listMonitors(): MonitorSummary[];
   getMonitor(id: number): MonitorView | undefined;
   runAvailableChecks(): Promise<void>;
@@ -106,12 +107,40 @@ export function createMonitorService(options: {
         continue;
       }
       try {
-        options.database.monitors.completeBaseline(
-          claimed,
-          createSnapshot(result.preview),
-          completedAt.toISOString(),
-          nextCheckAt,
-        );
+        const snapshot = createSnapshot(result.preview);
+        if (claimed.currentSnapshot === null) {
+          options.database.monitors.completeBaseline(
+            claimed,
+            snapshot,
+            completedAt.toISOString(),
+            nextCheckAt,
+          );
+        } else {
+          if (claimed.currentSnapshot.formatVersion !== snapshot.formatVersion) {
+            throw new SnapshotError(
+              "snapshot_invalid",
+              "Версия сохранённого Снимка не поддерживается.",
+            );
+          }
+          if (
+            Buffer.from(claimed.currentSnapshot.canonicalJson, "utf8").equals(
+              Buffer.from(snapshot.canonicalJson, "utf8"),
+            )
+          ) {
+            options.database.monitors.completeNoChange(
+              claimed,
+              completedAt.toISOString(),
+              nextCheckAt,
+            );
+          } else {
+            options.database.monitors.completeChange(
+              claimed,
+              snapshot,
+              completedAt.toISOString(),
+              nextCheckAt,
+            );
+          }
+        }
       } catch (error: unknown) {
         const failure =
           error instanceof SnapshotError
@@ -150,6 +179,17 @@ export function createMonitorService(options: {
         throw new Error("Created Monitor is missing");
       }
       return monitor;
+    },
+    async requestManualCheck(id) {
+      const enqueued = options.database.monitors.enqueueManualCheck(
+        id,
+        clock.now().toISOString(),
+      );
+      if (enqueued === undefined) {
+        return undefined;
+      }
+      await runAvailableChecks();
+      return options.database.monitors.getMonitor(id);
     },
     listMonitors: () => options.database.monitors.listMonitors(),
     getMonitor: (id) => options.database.monitors.getMonitor(id),

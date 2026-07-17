@@ -298,6 +298,27 @@ main {
   font-weight: 700;
 }
 
+.monitor-history > .secondary-button {
+  width: 100%;
+  margin-bottom: 1rem;
+}
+
+.secondary-button {
+  min-height: 40px;
+  padding: 8px 14px;
+  color: #245fae;
+  font-weight: 700;
+  background: #ffffff;
+  border: 1px solid #8fb2df;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.secondary-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .monitor-settings,
 .history-list {
   display: grid;

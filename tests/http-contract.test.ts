@@ -51,6 +51,9 @@ describe("public HTTP contract", () => {
     expect(
       document.paths["/api/monitors/{monitorId}/checks"]?.get?.operationId,
     ).toBe("listMonitorChecks");
+    expect(
+      document.paths["/api/monitors/{monitorId}/checks"]?.post?.operationId,
+    ).toBe("requestManualCheck");
     expect(document.paths["/api/version"]?.get?.operationId).toBe("getVersion");
     expect(Object.keys(document.components.schemas).sort()).toEqual([
       "ApiErrorV1",

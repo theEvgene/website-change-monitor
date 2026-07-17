@@ -48,7 +48,7 @@ describe("durable Check scheduling", () => {
     const automatic = database.monitors.claimNextCheck(at(3), true)!;
     selectedKinds.push(automatic.kind);
 
-    expect(selectedKinds).toEqual(["manual", "manual", "manual", "scheduled"]);
+    expect(selectedKinds).toEqual(["manual", "manual", "manual", "retry"]);
   });
 
   async function fixture() {

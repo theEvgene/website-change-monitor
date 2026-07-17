@@ -7,6 +7,7 @@ import { initialMigration } from "./migrations/001-initial.js";
 import { monitorsMigration } from "./migrations/002-monitors.js";
 import { manualChecksMigration } from "./migrations/003-manual-checks.js";
 import { automaticSchedulingMigration } from "./migrations/004-automatic-scheduling.js";
+import { retriesAndPauseMigration } from "./migrations/005-retries-and-pause.js";
 import { createMonitorStore, type MonitorStore } from "./monitor-store.js";
 
 export interface DatabaseDiagnostics {
@@ -40,6 +41,7 @@ const migrations = [
   monitorsMigration,
   manualChecksMigration,
   automaticSchedulingMigration,
+  retriesAndPauseMigration,
 ];
 
 export function openApplicationDatabase(

@@ -17,6 +17,8 @@ export interface StartApplicationOptions {
   openBrowser(url: string): Promise<void>;
   startPageProbe?(): Promise<PageProbeRuntime>;
   workerIntervalMs?: number;
+  workerShutdownMs?: number;
+  orchestrationTimeoutMs?: number;
 }
 
 export type StartOutcome =
@@ -63,6 +65,12 @@ export async function startApplication(
       ...(options.workerIntervalMs === undefined
         ? {}
         : { workerIntervalMs: options.workerIntervalMs }),
+      ...(options.workerShutdownMs === undefined
+        ? {}
+        : { workerShutdownMs: options.workerShutdownMs }),
+      ...(options.orchestrationTimeoutMs === undefined
+        ? {}
+        : { orchestrationTimeoutMs: options.orchestrationTimeoutMs }),
     });
     await server.listen({ host: "127.0.0.1", port: options.port });
     const listenerAddress = server.server.address();

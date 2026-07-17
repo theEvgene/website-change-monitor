@@ -46,6 +46,7 @@ describe("Monitors HTTP API", () => {
       exclusionSelectors: [".price"],
       intervalHours: 12,
       scopeRevision: 1,
+      paused: false,
       nextCheckAt: expect.any(String),
       activeIntent: {
         kind: "scheduled",
@@ -56,6 +57,7 @@ describe("Monitors HTTP API", () => {
         {
           status: "succeeded",
           result: "baseline",
+          isFinalError: false,
           snapshot: {
             id: expect.any(Number),
             formatVersion: 1,
@@ -112,6 +114,22 @@ describe("Monitors HTTP API", () => {
         dueAt: created.nextCheckAt,
       }),
     ]);
+
+    const pausedResponse = await server.inject({
+      method: "POST",
+      url: `/api/monitors/${created.id}/pause`,
+      headers: { host: "127.0.0.1:43117" },
+    });
+    expect(pausedResponse.statusCode).toBe(200);
+    expect(pausedResponse.json()).toMatchObject({ id: created.id, paused: true });
+
+    const resumedResponse = await server.inject({
+      method: "POST",
+      url: `/api/monitors/${created.id}/resume`,
+      headers: { host: "127.0.0.1:43117" },
+    });
+    expect(resumedResponse.statusCode).toBe(200);
+    expect(resumedResponse.json()).toMatchObject({ id: created.id, paused: false });
   });
 
   it("runs a manual Check through the documented Monitor API", async () => {

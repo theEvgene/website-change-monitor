@@ -35,6 +35,8 @@ describe("public HTTP contract", () => {
       "/api/monitors",
       "/api/monitors/{monitorId}",
       "/api/monitors/{monitorId}/checks",
+      "/api/monitors/{monitorId}/pause",
+      "/api/monitors/{monitorId}/resume",
       "/api/preview",
       "/api/version",
     ]);
@@ -60,6 +62,8 @@ describe("public HTTP contract", () => {
     expect(
       document.paths["/api/monitors/{monitorId}/checks"]?.post?.operationId,
     ).toBe("requestManualCheck");
+    expect(document.paths["/api/monitors/{monitorId}/pause"]?.post?.operationId).toBe("pauseMonitor");
+    expect(document.paths["/api/monitors/{monitorId}/resume"]?.post?.operationId).toBe("resumeMonitor");
     expect(document.paths["/api/version"]?.get?.operationId).toBe("getVersion");
     expect(Object.keys(document.components.schemas).sort()).toEqual([
       "ApiErrorV1",

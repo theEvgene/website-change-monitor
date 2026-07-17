@@ -100,6 +100,8 @@ Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:43117/api/monitors' -Conte
 - `GET /api/checks` — общий Журнал всех Проверок, от новых к старым;
 - `GET /api/checks/{checkId}/comparison` — двухколоночное Сравнение снимков известной Проверки.
 - `GET /api/check-intents` — активная очередь с видом, состоянием и сроком каждой ожидающей или выполняющейся Проверки.
+- `POST /api/monitors/{monitorId}/pause` — приостановить автоматические Проверки, сохранив Историю и Ручную проверку;
+- `POST /api/monitors/{monitorId}/resume` — возобновить Монитор, начиная с ожидающей Повторной либо одной Просроченной проверки.
 
 Запустить Ручную проверку первого сохранённого Монитора и получить её долговечный результат:
 
@@ -119,6 +121,22 @@ Invoke-RestMethod -Uri 'http://127.0.0.1:43117/api/check-intents' | ConvertTo-Js
 ```
 
 Обычный следующий срок вычисляется от завершения Проверки. После перезапуска все пропущенные интервалы сворачиваются в одну Просроченную проверку на Монитор; очередь не воспроизводит каждый пропущенный запуск.
+
+Приостановить и затем возобновить первый Монитор:
+
+<!-- verify:powershell-pause-monitor -->
+```powershell
+$monitor = (Invoke-RestMethod -Uri 'http://127.0.0.1:43117/api/monitors')[0]
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:43117/api/monitors/$($monitor.id)/pause" -ContentType 'application/json' -Body '{}' | ConvertTo-Json -Compress -Depth 12
+```
+
+<!-- verify:powershell-resume-monitor -->
+```powershell
+$monitor = (Invoke-RestMethod -Uri 'http://127.0.0.1:43117/api/monitors')[0]
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:43117/api/monitors/$($monitor.id)/resume" -ContentType 'application/json' -Body '{}' | ConvertTo-Json -Compress -Depth 12
+```
+
+Первая ошибка Проверки создаёт ровно одну Повторную проверку через минуту. Только ошибка Повторной проверки помечается как `isFinalError: true`; успешный retry или Окончательная ошибка возвращают Монитор к обычному Интервалу проверки. При перезапуске прерванная Проверка фиксируется с `errorCode: "application_shutdown"` и проходит то же правило единственного повтора.
 
 Прочитать общий Журнал, включая идентификаторы Проверок и ссылки на снимки:
 

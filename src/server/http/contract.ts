@@ -255,6 +255,7 @@ const checkProperties = {
   errorMessage: { type: ["string", "null"] },
   beforeSnapshotId: { type: ["integer", "null"], minimum: 1 },
   afterSnapshotId: { type: ["integer", "null"], minimum: 1 },
+  isFinalError: { type: "boolean" },
   snapshot: {
     anyOf: [
       {
@@ -283,6 +284,7 @@ export const monitorCheckSchemaV1 = {
     "errorMessage",
     "beforeSnapshotId",
     "afterSnapshotId",
+    "isFinalError",
     "snapshot",
   ],
   properties: checkProperties,
@@ -331,6 +333,7 @@ const monitorSummaryProperties = {
     enum: ["baseline", "no_change", "change", "error", null],
     type: ["string", "null"],
   },
+  paused: { type: "boolean" },
   activeIntent: activeIntentSchema,
 } as const;
 
@@ -346,6 +349,7 @@ export const monitorSummarySchemaV1 = {
     "scopeRevision",
     "nextCheckAt",
     "latestCheckResult",
+    "paused",
     "activeIntent",
   ],
   properties: monitorSummaryProperties,
@@ -370,6 +374,7 @@ export const monitorDetailSchemaV1 = {
     "intervalHours",
     "scopeRevision",
     "nextCheckAt",
+    "paused",
     "activeIntent",
     "history",
   ],
@@ -382,6 +387,7 @@ export const monitorDetailSchemaV1 = {
     intervalHours: monitorSummaryProperties.intervalHours,
     scopeRevision: monitorSummaryProperties.scopeRevision,
     nextCheckAt: monitorSummaryProperties.nextCheckAt,
+    paused: monitorSummaryProperties.paused,
     activeIntent: monitorSummaryProperties.activeIntent,
     history: { type: "array", items: { $ref: "MonitorCheckV1#" } },
   },
@@ -401,6 +407,7 @@ export const journalCheckSchemaV1 = {
     "id", "monitorId", "monitorName", "kind", "status", "result",
     "startedAt", "completedAt", "errorCode", "errorMessage",
     "beforeSnapshotId", "afterSnapshotId",
+    "isFinalError",
   ],
   properties: {
     id: checkProperties.id,
@@ -415,6 +422,7 @@ export const journalCheckSchemaV1 = {
     errorMessage: checkProperties.errorMessage,
     beforeSnapshotId: checkProperties.beforeSnapshotId,
     afterSnapshotId: checkProperties.afterSnapshotId,
+    isFinalError: checkProperties.isFinalError,
   },
 } as const;
 
@@ -576,6 +584,28 @@ export const listMonitorChecksRouteSchema: FastifySchema = {
 export const requestManualCheckRouteSchema: FastifySchema = {
   operationId: "requestManualCheck",
   summary: "Запустить Ручную проверку Монитора",
+  params: monitorIdParams,
+  response: {
+    200: { $ref: "MonitorDetailV1#" },
+    404: { $ref: "ApiErrorV1#" },
+    ...commonErrors,
+  },
+};
+
+export const pauseMonitorRouteSchema: FastifySchema = {
+  operationId: "pauseMonitor",
+  summary: "Приостановить автоматические Проверки Монитора",
+  params: monitorIdParams,
+  response: {
+    200: { $ref: "MonitorDetailV1#" },
+    404: { $ref: "ApiErrorV1#" },
+    ...commonErrors,
+  },
+};
+
+export const resumeMonitorRouteSchema: FastifySchema = {
+  operationId: "resumeMonitor",
+  summary: "Возобновить автоматические Проверки Монитора",
   params: monitorIdParams,
   response: {
     200: { $ref: "MonitorDetailV1#" },

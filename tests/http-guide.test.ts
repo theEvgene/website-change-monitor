@@ -72,6 +72,12 @@ describe("documented direct HTTP examples", () => {
       example(guide, "powershell-check-intents"),
       port,
     );
+    const pausedMonitorResult = await runDocumentedExample(
+      example(guide, "powershell-pause-monitor"), port,
+    );
+    const resumedMonitorResult = await runDocumentedExample(
+      example(guide, "powershell-resume-monitor"), port,
+    );
 
     expect(JSON.parse(powershellResult)).toMatchObject({
       application: "website-change-monitor",
@@ -141,6 +147,8 @@ describe("documented direct HTTP examples", () => {
     expect(intents).toEqual(expect.arrayContaining([
       expect.objectContaining({ monitorName: "Catalog", kind: "scheduled", state: "queued" }),
     ]));
+    expect(JSON.parse(pausedMonitorResult)).toMatchObject({ name: "Catalog", paused: true });
+    expect(JSON.parse(resumedMonitorResult)).toMatchObject({ name: "Catalog", paused: false });
   }, 15_000);
 });
 

@@ -56,6 +56,7 @@ export interface MonitorCheckRecord {
   errorMessage: string | null;
   beforeSnapshotId: number | null;
   afterSnapshotId: number | null;
+  isFinalError: boolean;
   snapshot: (SnapshotRecord & { id: number }) | null;
 }
 
@@ -68,6 +69,7 @@ export interface MonitorRecord {
   intervalHours: 6 | 12 | 24 | 48 | 72;
   scopeRevision: number;
   nextCheckAt: string | null;
+  paused: boolean;
   activeIntent: CheckIntentRecord | null;
   history: MonitorCheckRecord[];
 }
@@ -79,6 +81,7 @@ export interface MonitorSummaryRecord {
   intervalHours: 6 | 12 | 24 | 48 | 72;
   scopeRevision: number;
   nextCheckAt: string | null;
+  paused: boolean;
   latestCheckResult: CheckResult | null;
   activeIntent: CheckIntentRecord | null;
 }
@@ -96,6 +99,7 @@ export interface JournalCheckRecord {
   errorMessage: string | null;
   beforeSnapshotId: number | null;
   afterSnapshotId: number | null;
+  isFinalError: boolean;
 }
 
 export interface ComparisonSnapshotPair {
@@ -112,6 +116,7 @@ export interface MonitorStore {
   createMonitor(input: CreateMonitorRecord, now: string): number;
   enqueueManualCheck(monitorId: number, now: string): boolean | undefined;
   reconcileSchedule(now: string, recoverOverdue: boolean): void;
+  recoverInterrupted(now: string): void;
   claimNextCheck(now: string, preferAutomatic?: boolean): ClaimedCheck | undefined;
   completeBaseline(
     claimed: ClaimedCheck,
@@ -136,6 +141,7 @@ export interface MonitorStore {
     completedAt: string,
     nextCheckAt: string,
   ): void;
+  setPaused(monitorId: number, paused: boolean, now: string): boolean | undefined;
   listMonitors(): MonitorSummaryRecord[];
   listJournal(): JournalCheckRecord[];
   listActiveIntents(): CheckIntentRecord[];
@@ -210,26 +216,30 @@ export function createMonitorStore(
   );
 
   const selectNextIntent = database.prepare(`
-    SELECT id, monitor_id, scope_revision, kind
-    FROM check_intents
-    WHERE state = 'queued' AND due_at <= ?
-    ORDER BY CASE kind
+    SELECT i.id, i.monitor_id, i.scope_revision, i.kind
+    FROM check_intents i
+    JOIN monitors m ON m.id = i.monitor_id
+    WHERE i.state = 'queued' AND i.due_at <= ?
+      AND (m.paused = 0 OR i.kind = 'manual')
+    ORDER BY CASE i.kind
       WHEN 'manual' THEN 0
       WHEN 'retry' THEN 1
       WHEN 'overdue' THEN 2
       ELSE 3
-    END, due_at, id
+    END, i.due_at, i.id
     LIMIT 1
   `);
   const selectNextAutomaticIntent = database.prepare(`
-    SELECT id, monitor_id, scope_revision, kind
-    FROM check_intents
-    WHERE state = 'queued' AND due_at <= ? AND kind <> 'manual'
-    ORDER BY CASE kind
+    SELECT i.id, i.monitor_id, i.scope_revision, i.kind
+    FROM check_intents i
+    JOIN monitors m ON m.id = i.monitor_id
+    WHERE i.state = 'queued' AND i.due_at <= ? AND i.kind <> 'manual'
+      AND m.paused = 0
+    ORDER BY CASE i.kind
       WHEN 'retry' THEN 0
       WHEN 'overdue' THEN 1
       ELSE 2
-    END, due_at, id
+    END, i.due_at, i.id
     LIMIT 1
   `);
   const markIntentRunning = database.prepare(`
@@ -341,7 +351,7 @@ export function createMonitorStore(
   const failCheckStatement = database.prepare(`
     UPDATE checks
     SET status = 'failed', result = 'error', error_code = ?,
-        error_message = ?, completed_at = ?
+        error_message = ?, completed_at = ?, is_final_error = ?
     WHERE id = ? AND status = 'running'
   `);
   const finishIntent = database.prepare(`
@@ -365,6 +375,16 @@ export function createMonitorStore(
       monitor_id, scope_revision, kind, state, due_at, created_at
     ) VALUES (?, ?, 'scheduled', 'queued', ?, ?)
   `);
+  const insertRetryIntent = database.prepare(`
+    INSERT INTO check_intents (
+      monitor_id, scope_revision, kind, state, due_at, created_at, retry_of_check_id
+    ) VALUES (?, ?, 'retry', 'queued', ?, ?, ?)
+  `);
+  const selectQueuedRetryDue = database.prepare(`
+    SELECT due_at FROM check_intents
+    WHERE monitor_id = ? AND state = 'queued' AND kind = 'retry'
+    ORDER BY due_at, id LIMIT 1
+  `);
 
   function replaceOrdinarySchedule(
     claimed: ClaimedCheck,
@@ -378,9 +398,12 @@ export function createMonitorStore(
       nextCheckAt,
       completedAt,
     );
+    const pendingRetry = selectQueuedRetryDue.get(claimed.monitorId) as
+      | { due_at: string }
+      | undefined;
     assertChanged(
       scheduleMonitor.run(
-        nextCheckAt,
+        pendingRetry?.due_at ?? nextCheckAt,
         completedAt,
         claimed.monitorId,
         claimed.scopeRevision,
@@ -497,18 +520,113 @@ export function createMonitorStore(
       completedAt: string,
       nextCheckAt: string,
     ) => {
-      assertChanged(
-        failCheckStatement.run(
-          error.code,
-          error.message,
-          completedAt,
-          claimed.checkId,
-        ).changes,
-      );
+      const finalError = claimed.kind === "retry";
+      assertChanged(failCheckStatement.run(
+        error.code, error.message, completedAt, finalError ? 1 : 0,
+        claimed.checkId,
+      ).changes);
       assertChanged(finishIntent.run(completedAt, claimed.intentId).changes);
-      replaceOrdinarySchedule(claimed, completedAt, nextCheckAt);
+      if (finalError) {
+        replaceOrdinarySchedule(claimed, completedAt, nextCheckAt);
+      } else {
+        const retryAt = new Date(new Date(completedAt).getTime() + 60_000).toISOString();
+        cancelQueuedAutomatic.run(completedAt, claimed.monitorId);
+        insertRetryIntent.run(
+          claimed.monitorId, claimed.scopeRevision, retryAt, completedAt,
+          claimed.checkId,
+        );
+        assertChanged(scheduleMonitor.run(
+          retryAt, completedAt, claimed.monitorId, claimed.scopeRevision,
+        ).changes);
+      }
     },
   );
+
+  const selectPauseState = database.prepare(`
+    SELECT id, scope_revision, current_snapshot_id, next_check_at
+    FROM monitors WHERE id = ?
+  `);
+  const updatePaused = database.prepare(`
+    UPDATE monitors SET paused = ?, updated_at = ? WHERE id = ?
+  `);
+  const setPausedTransaction = database.transaction(
+    (monitorId: number, paused: boolean, now: string): boolean | undefined => {
+      const monitor = selectPauseState.get(monitorId) as
+        | { id: number; scope_revision: number; current_snapshot_id: number | null; next_check_at: string | null }
+        | undefined;
+      if (monitor === undefined) return undefined;
+      updatePaused.run(paused ? 1 : 0, now, monitorId);
+      if (!paused) {
+        const retry = database.prepare(`
+          SELECT 1 FROM check_intents
+          WHERE monitor_id = ? AND state IN ('queued', 'running') AND kind = 'retry'
+        `).get(monitorId);
+        if (retry === undefined) {
+          database.prepare(`
+            UPDATE check_intents SET kind = 'overdue'
+            WHERE monitor_id = ? AND state = 'queued' AND kind = 'scheduled'
+              AND due_at <= ? AND ? IS NOT NULL
+          `).run(monitorId, now, monitor.current_snapshot_id);
+          const activeAutomatic = database.prepare(`
+            SELECT 1 FROM check_intents
+            WHERE monitor_id = ? AND state IN ('queued', 'running')
+              AND kind IN ('scheduled', 'overdue')
+          `).get(monitorId);
+          if (activeAutomatic === undefined && monitor.next_check_at !== null) {
+            const kind = monitor.next_check_at <= now && monitor.current_snapshot_id !== null
+              ? "overdue" : "scheduled";
+            database.prepare(`
+              INSERT INTO check_intents (
+                monitor_id, scope_revision, kind, state, due_at, created_at
+              ) VALUES (?, ?, ?, 'queued', ?, ?)
+            `).run(monitorId, monitor.scope_revision, kind, monitor.next_check_at, now);
+          }
+        }
+      }
+      return true;
+    },
+  );
+
+  const recoverInterruptedTransaction = database.transaction((now: string) => {
+    const rows = database.prepare(`
+      SELECT i.id intent_id, i.kind, i.monitor_id, i.scope_revision,
+             c.id check_id, m.interval_hours
+      FROM check_intents i
+      JOIN checks c ON c.intent_id = i.id AND c.status = 'running'
+      JOIN monitors m ON m.id = i.monitor_id
+      WHERE i.state = 'running'
+      ORDER BY i.id
+    `).all() as Array<{
+      intent_id: number; kind: CheckIntentKind; monitor_id: number;
+      scope_revision: number; check_id: number;
+      interval_hours: 6 | 12 | 24 | 48 | 72;
+    }>;
+    for (const row of rows) {
+      const finalError = row.kind === "retry";
+      assertChanged(failCheckStatement.run(
+        "application_shutdown",
+        "Проверка была прервана завершением приложения.",
+        now,
+        finalError ? 1 : 0,
+        row.check_id,
+      ).changes);
+      assertChanged(finishIntent.run(now, row.intent_id).changes);
+      cancelQueuedAutomatic.run(now, row.monitor_id);
+      if (finalError) {
+        const nextAt = new Date(
+          new Date(now).getTime() + row.interval_hours * 60 * 60 * 1_000,
+        ).toISOString();
+        insertScheduledIntent.run(row.monitor_id, row.scope_revision, nextAt, now);
+        scheduleMonitor.run(nextAt, now, row.monitor_id, row.scope_revision);
+      } else {
+        const retryAt = new Date(new Date(now).getTime() + 60_000).toISOString();
+        insertRetryIntent.run(
+          row.monitor_id, row.scope_revision, retryAt, now, row.check_id,
+        );
+        scheduleMonitor.run(retryAt, now, row.monitor_id, row.scope_revision);
+      }
+    }
+  });
 
   return {
     createMonitor: createMonitorTransaction,
@@ -544,16 +662,18 @@ export function createMonitorStore(
         `).run({ now, recover: recoverOverdue ? 1 : 0 });
       })();
     },
+    recoverInterrupted: recoverInterruptedTransaction,
     claimNextCheck: claimTransaction,
     completeBaseline: completeBaselineTransaction,
     completeNoChange: completeNoChangeTransaction,
     completeChange: completeChangeTransaction,
     failCheck: failCheckTransaction,
+    setPaused: setPausedTransaction,
     listMonitors() {
       const rows = database
         .prepare(`
           SELECT m.id, m.name, m.url, m.interval_hours, m.scope_revision,
-                 m.next_check_at,
+                 m.next_check_at, m.paused,
                  (SELECT c.result FROM checks c
                   WHERE c.monitor_id = m.id ORDER BY c.id DESC LIMIT 1) latest_result,
                  i.id intent_id, i.kind intent_kind, i.state intent_state,
@@ -576,6 +696,7 @@ export function createMonitorStore(
         interval_hours: 6 | 12 | 24 | 48 | 72;
         scope_revision: number;
         next_check_at: string | null;
+        paused: 0 | 1;
         latest_result: CheckResult | null;
         intent_id: number | null;
         intent_kind: CheckIntentKind | null;
@@ -593,6 +714,7 @@ export function createMonitorStore(
         intervalHours: row.interval_hours,
         scopeRevision: row.scope_revision,
         nextCheckAt: row.next_check_at,
+        paused: row.paused === 1,
         latestCheckResult: row.latest_result,
         activeIntent: intentFromJoinedRow(row, row.name),
       }));
@@ -621,7 +743,8 @@ export function createMonitorStore(
         .prepare(`
           SELECT c.id, c.monitor_id, m.name monitor_name, c.kind, c.status,
                  c.result, c.started_at, c.completed_at, c.error_code,
-                 c.error_message, c.before_snapshot_id, c.after_snapshot_id
+                 c.error_message, c.before_snapshot_id, c.after_snapshot_id,
+                 c.is_final_error
           FROM checks c
           JOIN monitors m ON m.id = c.monitor_id
           ORDER BY c.id DESC
@@ -639,6 +762,7 @@ export function createMonitorStore(
         error_message: string | null;
         before_snapshot_id: number | null;
         after_snapshot_id: number | null;
+        is_final_error: 0 | 1;
       }>;
       return rows.map((row) => ({
         id: row.id,
@@ -653,6 +777,7 @@ export function createMonitorStore(
         errorMessage: row.error_message,
         beforeSnapshotId: row.before_snapshot_id,
         afterSnapshotId: row.after_snapshot_id,
+        isFinalError: row.is_final_error === 1,
       }));
     },
     getComparison(checkId) {
@@ -695,7 +820,7 @@ export function createMonitorStore(
     getMonitor(id) {
       const row = database
         .prepare(`
-          SELECT id, name, url, interval_hours, scope_revision, next_check_at
+          SELECT id, name, url, interval_hours, scope_revision, next_check_at, paused
           FROM monitors WHERE id = ?
         `)
         .get(id) as
@@ -706,6 +831,7 @@ export function createMonitorStore(
             interval_hours: 6 | 12 | 24 | 48 | 72;
             scope_revision: number;
             next_check_at: string | null;
+            paused: 0 | 1;
           }
         | undefined;
       if (row === undefined) {
@@ -715,7 +841,7 @@ export function createMonitorStore(
         .prepare(`
           SELECT c.id, c.kind, c.status, c.result, c.started_at,
                  c.completed_at, c.error_code, c.error_message,
-                 c.before_snapshot_id, c.after_snapshot_id,
+                 c.before_snapshot_id, c.after_snapshot_id, c.is_final_error,
                  s.id snapshot_id, s.format_version, s.sha256, s.canonical_json
           FROM checks c
           LEFT JOIN snapshots s ON s.check_id = c.id
@@ -733,6 +859,7 @@ export function createMonitorStore(
         error_message: string | null;
         before_snapshot_id: number | null;
         after_snapshot_id: number | null;
+        is_final_error: 0 | 1;
         snapshot_id: number | null;
         format_version: number | null;
         sha256: string | null;
@@ -747,6 +874,7 @@ export function createMonitorStore(
         intervalHours: row.interval_hours,
         scopeRevision: row.scope_revision,
         nextCheckAt: row.next_check_at,
+        paused: row.paused === 1,
         activeIntent: this.listActiveIntents().find((intent) => intent.monitorId === id) ?? null,
         history: checks.map((check) => ({
           id: check.id,
@@ -759,6 +887,7 @@ export function createMonitorStore(
           errorMessage: check.error_message,
           beforeSnapshotId: check.before_snapshot_id,
           afterSnapshotId: check.after_snapshot_id,
+          isFinalError: check.is_final_error === 1,
           snapshot:
             check.snapshot_id === null ||
             check.format_version === null ||

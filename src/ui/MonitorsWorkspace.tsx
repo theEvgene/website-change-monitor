@@ -15,7 +15,8 @@ interface MonitorSummary {
   scopeRevision: number;
   nextCheckAt: string | null;
   latestCheckResult: "baseline" | "no_change" | "change" | "error" | null;
-  activeIntent?: ActiveIntent | null;
+  activeIntent: ActiveIntent | null;
+  paused: boolean;
 }
 
 interface ActiveIntent {
@@ -34,6 +35,7 @@ interface MonitorCheck {
   errorMessage: string | null;
   beforeSnapshotId: number | null;
   afterSnapshotId: number | null;
+  isFinalError: boolean;
 }
 
 interface MonitorDetail extends MonitorSummary {
@@ -47,6 +49,8 @@ export function MonitorsWorkspace({ refreshToken }: { refreshToken: number }) {
   const [selected, setSelected] = useState<MonitorDetail | null>(null);
   const [manualBusy, setManualBusy] = useState(false);
   const [manualError, setManualError] = useState<string | null>(null);
+  const [pauseBusy, setPauseBusy] = useState(false);
+  const [pauseError, setPauseError] = useState<string | null>(null);
   const [comparison, setComparison] = useState<ComparisonResponse | null>(null);
 
   useEffect(() => {
@@ -95,7 +99,7 @@ export function MonitorsWorkspace({ refreshToken }: { refreshToken: number }) {
                   <td><button className="table-link" type="button" onClick={() => void loadMonitor(monitor.id, undefined, setSelected)}>{monitor.name}</button></td>
                   <td>{monitor.intervalHours} ч</td>
                   <td>{resultLabel(monitor.latestCheckResult)}</td>
-                  <td>{activeIntentLabel(monitor.activeIntent)}</td>
+                  <td>{monitor.paused ? "Приостановлен" : activeIntentLabel(monitor.activeIntent)}</td>
                   <td>{formatDate(monitor.nextCheckAt)}</td>
                 </tr>
               ))}
@@ -109,6 +113,7 @@ export function MonitorsWorkspace({ refreshToken }: { refreshToken: number }) {
           <>
             <h2>{selected.name}</h2>
             <p className="monitor-next-check">Следующая Проверка: {formatDate(selected.nextCheckAt)}</p>
+            {selected.paused ? <p className="status-badge status-badge--warning">Автоматические Проверки приостановлены</p> : null}
             {selected.activeIntent == null ? null : (
               <p className="monitor-queue-state">{activeIntentLabel(selected.activeIntent)}</p>
             )}
@@ -119,6 +124,15 @@ export function MonitorsWorkspace({ refreshToken }: { refreshToken: number }) {
               onClick={() => void requestManualCheck(selected.id)}
             >
               {manualBusy ? "Проверка выполняется…" : "Запустить сейчас"}
+            </button>
+            {pauseError === null ? null : <p className="form-error" role="alert">{pauseError}</p>}
+            <button
+              className="secondary-button"
+              type="button"
+              disabled={pauseBusy}
+              onClick={() => void changePaused(selected.id, !selected.paused)}
+            >
+              {selected.paused ? "Возобновить" : "Приостановить"}
             </button>
             {manualError === null ? null : (
               <p className="form-error" role="alert">{manualError}</p>
@@ -183,6 +197,28 @@ export function MonitorsWorkspace({ refreshToken }: { refreshToken: number }) {
       setManualBusy(false);
     }
   }
+
+  async function changePaused(id: number, paused: boolean) {
+    setPauseBusy(true);
+    setPauseError(null);
+    try {
+      const response = await fetch(`/api/monitors/${id}/${paused ? "pause" : "resume"}`, {
+        method: "POST", headers: { accept: "application/json" },
+      });
+      if (!response.ok) throw new Error(`Pause state failed: ${response.status}`);
+      const monitor = (await response.json()) as MonitorDetail;
+      setSelected(monitor);
+      setMonitors((items) => items.map((item) => item.id === id
+        ? { ...item, paused: monitor.paused, nextCheckAt: monitor.nextCheckAt, activeIntent: monitor.activeIntent }
+        : item));
+    } catch {
+      setPauseError(paused
+        ? "Не удалось приостановить автоматические Проверки."
+        : "Не удалось возобновить автоматические Проверки.");
+    } finally {
+      setPauseBusy(false);
+    }
+  }
 }
 
 async function loadMonitor(id: number, signal: AbortSignal | undefined, update: (monitor: MonitorDetail | null) => void) {
@@ -207,6 +243,7 @@ function resultLabel(result: MonitorCheck["result"]): string {
 }
 
 function checkLabel(check: MonitorCheck): string {
+  if (check.result === "error" && check.isFinalError) return "Окончательная ошибка";
   const result =
     check.status === "running" ? "Выполняется" : resultLabel(check.result);
   if (check.kind === "manual") return `Ручная проверка · ${result}`;

@@ -77,7 +77,9 @@ export interface MonitorService {
       })
     | undefined;
   getMonitor(id: number): MonitorView | undefined;
+  setPaused(id: number, paused: boolean): Promise<MonitorView | undefined>;
   runAvailableChecks(): Promise<void>;
+  stop(timeoutMs?: number): Promise<void>;
 }
 
 const intervalHours = new Set([6, 12, 24, 48, 72]);
@@ -93,14 +95,20 @@ export function createMonitorService(options: {
   database: ApplicationDatabase;
   pageProbe: PageProbe;
   clock?: Clock;
+  orchestrationTimeoutMs?: number;
 }): MonitorService {
   const clock = options.clock ?? { now: () => new Date() };
   let workerTail: Promise<void> = Promise.resolve();
   let recoverOverdue = true;
   let consecutiveManualChecks = 0;
+  let stopping = false;
+  let discardCurrentResult = false;
+  const orchestrationTimeoutMs = options.orchestrationTimeoutMs ?? 75_000;
 
   async function drainChecks(): Promise<void> {
+    if (stopping) return;
     const now = clock.now().toISOString();
+    if (recoverOverdue) options.database.monitors.recoverInterrupted(now);
     options.database.monitors.reconcileSchedule(now, recoverOverdue);
     recoverOverdue = false;
     for (;;) {
@@ -113,11 +121,15 @@ export function createMonitorService(options: {
       }
       consecutiveManualChecks =
         claimed.kind === "manual" ? consecutiveManualChecks + 1 : 0;
-      const result = await options.pageProbe.preview({
-        url: claimed.url,
-        targetSelectors: claimed.targetSelectors,
-        exclusionSelectors: claimed.exclusionSelectors,
-      });
+      const result = await withOrchestrationDeadline(
+        options.pageProbe.preview({
+          url: claimed.url,
+          targetSelectors: claimed.targetSelectors,
+          exclusionSelectors: claimed.exclusionSelectors,
+        }),
+        orchestrationTimeoutMs,
+      );
+      if (discardCurrentResult) return;
       const completedAt = clock.now();
       const nextCheckAt = new Date(
         completedAt.getTime() + claimed.intervalHours * 60 * 60 * 1_000,
@@ -181,6 +193,7 @@ export function createMonitorService(options: {
           nextCheckAt,
         );
       }
+      if (stopping) return;
     }
   }
 
@@ -236,8 +249,61 @@ export function createMonitorService(options: {
       };
     },
     getMonitor: (id) => options.database.monitors.getMonitor(id),
+    async setPaused(id, paused) {
+      const updated = options.database.monitors.setPaused(
+        id, paused, clock.now().toISOString(),
+      );
+      if (updated === undefined) return undefined;
+      if (!paused) await runAvailableChecks();
+      return options.database.monitors.getMonitor(id);
+    },
     runAvailableChecks,
+    async stop(timeoutMs = 8_000) {
+      stopping = true;
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      const completed = await Promise.race([
+        workerTail.then(() => true),
+        new Promise<false>((resolve) => {
+          timeout = setTimeout(() => resolve(false), timeoutMs);
+        }),
+      ]);
+      if (timeout !== undefined) clearTimeout(timeout);
+      if (!completed) {
+        discardCurrentResult = true;
+        options.database.monitors.recoverInterrupted(clock.now().toISOString());
+      }
+    },
   };
+}
+
+async function withOrchestrationDeadline(
+  work: Promise<Awaited<ReturnType<PageProbe["preview"]>>>,
+  timeoutMs: number,
+): Promise<Awaited<ReturnType<PageProbe["preview"]>>> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<Awaited<ReturnType<PageProbe["preview"]>>>((resolve) => {
+        timeout = setTimeout(() => resolve({
+          ok: false,
+          code: "check_deadline_exceeded",
+          message: "Превышен общий лимит выполнения Проверки.",
+          stage: "setup",
+          timings: {
+            totalMs: timeoutMs,
+            navigationMs: 0,
+            targetMs: 0,
+            scrollMs: 0,
+            stabilityMs: 0,
+            extractionMs: 0,
+          },
+        }), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
 }
 
 function validateMonitorInput(input: CreateMonitorInput): CreateMonitorRecord {

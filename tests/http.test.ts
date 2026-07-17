@@ -48,7 +48,7 @@ describe("local HTTP server", () => {
       version: "0.1.0",
       database: {
         status: "ready",
-        schemaVersion: 4,
+        schemaVersion: 5,
       },
       telegram: {
         status: "unavailable",

@@ -224,6 +224,7 @@ describe("startup UI", () => {
       exclusionSelectors: [],
       intervalHours: 24,
       scopeRevision: 1,
+      paused: false,
       nextCheckAt: "2026-07-18T08:00:00.000Z",
       activeIntent: {
         kind: "scheduled", state: "queued",
@@ -249,6 +250,8 @@ describe("startup UI", () => {
     };
     let saved = false;
     let manualRequested = false;
+    let paused = false;
+    let pauseFailures = 1;
     const fetchMock = vi.fn().mockImplementation(
       (input: RequestInfo | URL, init?: RequestInit) => {
         if (input === "/api/version") {
@@ -300,6 +303,7 @@ describe("startup UI", () => {
                       nextCheckAt: created.nextCheckAt,
                       latestCheckResult: "baseline",
                       activeIntent: created.activeIntent,
+                      paused,
                     },
                   ]
                 : [],
@@ -329,8 +333,20 @@ describe("startup UI", () => {
             }),
           );
         }
+        if (input === "/api/monitors/7/pause" && init?.method === "POST") {
+          if (pauseFailures > 0) {
+            pauseFailures -= 1;
+            return Promise.resolve(Response.json({}, { status: 500 }));
+          }
+          paused = true;
+          return Promise.resolve(Response.json({ ...created, paused }));
+        }
+        if (input === "/api/monitors/7/resume" && init?.method === "POST") {
+          paused = false;
+          return Promise.resolve(Response.json({ ...created, paused }));
+        }
         if (input === "/api/monitors/7") {
-          return Promise.resolve(Response.json(created));
+          return Promise.resolve(Response.json({ ...created, paused }));
         }
         throw new Error(`Unexpected request: ${String(input)}`);
       },
@@ -370,6 +386,12 @@ describe("startup UI", () => {
     ).toBeVisible();
     expect(within(historyPanel!).getByText(/Следующая Проверка:/u)).toBeVisible();
     expect(within(historyPanel!).getByText("Ожидает: Плановая проверка")).toBeVisible();
+    fireEvent.click(within(historyPanel!).getByRole("button", { name: "Приостановить" }));
+    expect(await within(historyPanel!).findByRole("alert")).toHaveTextContent("Не удалось приостановить");
+    fireEvent.click(within(historyPanel!).getByRole("button", { name: "Приостановить" }));
+    expect(await within(historyPanel!).findByText("Автоматические Проверки приостановлены")).toBeVisible();
+    fireEvent.click(within(historyPanel!).getByRole("button", { name: "Возобновить" }));
+    expect(await within(historyPanel!).findByRole("button", { name: "Приостановить" })).toBeVisible();
     fireEvent.click(
       within(historyPanel!).getByRole("button", { name: "Запустить сейчас" }),
     );
@@ -422,6 +444,15 @@ describe("startup UI", () => {
           completedAt: "2026-07-17T08:00:01.000Z",
           errorCode: null, errorMessage: null,
           beforeSnapshotId: 3, afterSnapshotId: 3,
+          isFinalError: false,
+        }, {
+          id: 20, monitorId: 7, monitorName: "Catalog", kind: "retry",
+          status: "failed", result: "error",
+          startedAt: "2026-07-17T07:00:00.000Z",
+          completedAt: "2026-07-17T07:00:01.000Z",
+          errorCode: "navigation_failed", errorMessage: "Ошибка навигации.",
+          beforeSnapshotId: null, afterSnapshotId: null,
+          isFinalError: true,
         }]));
       }
       if (input === "/api/checks/22/comparison") {
@@ -442,6 +473,7 @@ describe("startup UI", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Журнал" }));
     expect((await screen.findAllByRole("cell", { name: "Catalog" }))[0]).toBeVisible();
+    expect(screen.getByRole("cell", { name: "Окончательная ошибка" })).toBeVisible();
     const comparisonButtons = screen.getAllByRole("button", { name: "Открыть Сравнение" });
     expect(comparisonButtons).toHaveLength(2);
     fireEvent.click(comparisonButtons[0]!);

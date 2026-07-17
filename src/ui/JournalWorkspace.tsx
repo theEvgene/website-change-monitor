@@ -19,6 +19,7 @@ interface JournalCheck {
   errorMessage: string | null;
   beforeSnapshotId: number | null;
   afterSnapshotId: number | null;
+  isFinalError: boolean;
 }
 
 export function JournalWorkspace() {
@@ -85,7 +86,7 @@ function resultLabel(check: JournalCheck): string {
   if (check.result === "baseline") return "Базовый снимок";
   if (check.result === "no_change") return "Без изменений";
   if (check.result === "change") return "Обнаружено изменение";
-  if (check.result === "error") return "Ошибка";
+  if (check.result === "error") return check.isFinalError ? "Окончательная ошибка" : "Ошибка — ожидается Повторная проверка";
   return "Неизвестно";
 }
 

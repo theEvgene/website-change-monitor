@@ -39,6 +39,8 @@ import {
   previewResponseSchemaV1,
   previewRouteSchema,
   requestManualCheckRouteSchema,
+  pauseMonitorRouteSchema,
+  resumeMonitorRouteSchema,
   versionResponseSchemaV1,
   versionRouteSchema,
 } from "./contract.js";
@@ -50,6 +52,8 @@ export interface BuildHttpServerOptions {
   pageProbe?: PageProbe;
   staticRoot?: string;
   workerIntervalMs?: number;
+  workerShutdownMs?: number;
+  orchestrationTimeoutMs?: number;
 }
 
 export function buildHttpServer(
@@ -60,6 +64,9 @@ export function buildHttpServer(
   const monitors = createMonitorService({
     database: options.database,
     pageProbe,
+    ...(options.orchestrationTimeoutMs === undefined
+      ? {}
+      : { orchestrationTimeoutMs: options.orchestrationTimeoutMs }),
   });
   let workerTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -73,6 +80,7 @@ export function buildHttpServer(
 
   server.addHook("onClose", async () => {
     if (workerTimer !== undefined) clearInterval(workerTimer);
+    await monitors.stop(options.workerShutdownMs ?? 8_000);
   });
 
   server.addHook("onRequest", async (request, reply) => {
@@ -314,6 +322,30 @@ export function buildHttpServer(
           return reply
             .code(404)
             .send(apiError("not_found", "Монитор не найден."));
+        }
+        return publicMonitor(monitor);
+      },
+    );
+
+    apiServer.post<{ Params: { monitorId: number } }>(
+      "/api/monitors/:monitorId/pause",
+      { schema: pauseMonitorRouteSchema },
+      async (request, reply) => {
+        const monitor = await monitors.setPaused(request.params.monitorId, true);
+        if (monitor === undefined) {
+          return reply.code(404).send(apiError("not_found", "Монитор не найден."));
+        }
+        return publicMonitor(monitor);
+      },
+    );
+
+    apiServer.post<{ Params: { monitorId: number } }>(
+      "/api/monitors/:monitorId/resume",
+      { schema: resumeMonitorRouteSchema },
+      async (request, reply) => {
+        const monitor = await monitors.setPaused(request.params.monitorId, false);
+        if (monitor === undefined) {
+          return reply.code(404).send(apiError("not_found", "Монитор не найден."));
         }
         return publicMonitor(monitor);
       },

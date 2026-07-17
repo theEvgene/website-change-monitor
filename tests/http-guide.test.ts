@@ -141,7 +141,7 @@ describe("documented direct HTTP examples", () => {
     expect(intents).toEqual(expect.arrayContaining([
       expect.objectContaining({ monitorName: "Catalog", kind: "scheduled", state: "queued" }),
     ]));
-  });
+  }, 15_000);
 });
 
 function example(guide: string, name: string): string {

@@ -52,6 +52,10 @@ export function buildHttpServer(
     pageProbe,
   });
 
+  server.addHook("onReady", async () => {
+    await monitors.runAvailableChecks();
+  });
+
   server.addHook("onRequest", async (request, reply) => {
     const allowedHosts = new Set([
       `127.0.0.1:${options.port}`,
@@ -229,7 +233,12 @@ export function buildHttpServer(
           if (error instanceof PageProbeError) {
             return reply
               .code(pageProbeStatus(error.code))
-              .send(apiError(error.code, error.message));
+              .send(
+                apiError(error.code, error.message, {
+                  ...(error.field === undefined ? {} : { field: error.field }),
+                  ...(error.index === undefined ? {} : { index: error.index }),
+                }),
+              );
           }
           throw error;
         }

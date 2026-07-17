@@ -123,6 +123,51 @@ describe("Monitor use case", () => {
     expect(restarted.getMonitor(monitor.id)).toEqual(monitor);
   });
 
+  it("resumes a queued initial CheckIntent after reopening the database", async () => {
+    const root = await mkdtemp(join(tmpdir(), "website-change-monitor-"));
+    roots.push(root);
+    const database = openApplicationDatabase({ rootDirectory: root });
+    const monitorId = database.monitors.createMonitor(
+      {
+        name: "Catalog",
+        url: "https://example.com/catalog",
+        targetSelectors: [".card"],
+        exclusionSelectors: [],
+        intervalHours: 6,
+      },
+      "2026-07-17T08:00:00.000Z",
+    );
+    database.close();
+
+    const reopened = openApplicationDatabase({ rootDirectory: root });
+    databases.push(reopened);
+    const preview = vi.fn<PageProbe["preview"]>().mockResolvedValue(
+      successfulPageProbeResult(
+        "https://example.com/catalog",
+        [{ selector: ".card", matchCount: 1 }],
+        simplePagePreviewTargets("Product"),
+      ),
+    );
+    const restarted = createMonitorService({
+      database: reopened,
+      pageProbe: { preview },
+      clock: { now: () => new Date("2026-07-17T08:01:00.000Z") },
+    });
+
+    await restarted.runAvailableChecks();
+
+    expect(restarted.getMonitor(monitorId)).toMatchObject({
+      nextCheckAt: "2026-07-17T14:01:00.000Z",
+      history: [
+        {
+          status: "succeeded",
+          result: "baseline",
+          snapshot: { formatVersion: 1 },
+        },
+      ],
+    });
+  });
+
   it.each([
     [
       "targets",

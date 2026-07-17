@@ -56,6 +56,10 @@ describe("documented direct HTTP examples", () => {
       example(guide, "powershell-create-monitor"),
       port,
     );
+    const manualCheckResult = await runDocumentedExample(
+      example(guide, "powershell-manual-check"),
+      port,
+    );
 
     expect(JSON.parse(powershellResult)).toMatchObject({
       application: "website-change-monitor",
@@ -90,6 +94,19 @@ describe("documented direct HTTP examples", () => {
             sha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
           },
         },
+      ],
+    });
+    expect(JSON.parse(manualCheckResult)).toMatchObject({
+      history: [
+        {
+          kind: "manual",
+          status: "succeeded",
+          result: "no_change",
+          beforeSnapshotId: expect.any(Number),
+          afterSnapshotId: expect.any(Number),
+          snapshot: null,
+        },
+        { result: "baseline" },
       ],
     });
   });

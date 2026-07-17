@@ -244,6 +244,7 @@ describe("startup UI", () => {
       ],
     };
     let saved = false;
+    let manualRequested = false;
     const fetchMock = vi.fn().mockImplementation(
       (input: RequestInfo | URL, init?: RequestInit) => {
         if (input === "/api/version") {
@@ -300,6 +301,29 @@ describe("startup UI", () => {
             ),
           );
         }
+        if (input === "/api/monitors/7/checks" && init?.method === "POST") {
+          manualRequested = true;
+          return Promise.resolve(
+            Response.json({
+              ...created,
+              nextCheckAt: "2026-07-18T09:00:00.000Z",
+              history: [
+                {
+                  ...created.history[0],
+                  id: 12,
+                  kind: "manual",
+                  result: "no_change",
+                  startedAt: "2026-07-17T09:00:00.000Z",
+                  completedAt: "2026-07-17T09:00:01.000Z",
+                  beforeSnapshotId: 3,
+                  afterSnapshotId: 3,
+                  snapshot: null,
+                },
+                created.history[0],
+              ],
+            }),
+          );
+        }
         if (input === "/api/monitors/7") {
           return Promise.resolve(Response.json(created));
         }
@@ -340,6 +364,13 @@ describe("startup UI", () => {
       await within(historyPanel!).findByText("Базовый снимок"),
     ).toBeVisible();
     expect(within(historyPanel!).getByText(/Следующая Проверка:/u)).toBeVisible();
+    fireEvent.click(
+      within(historyPanel!).getByRole("button", { name: "Запустить сейчас" }),
+    );
+    expect(
+      await within(historyPanel!).findByText("Ручная проверка · Без изменений"),
+    ).toBeVisible();
+    expect(manualRequested).toBe(true);
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/monitors",
       expect.objectContaining({

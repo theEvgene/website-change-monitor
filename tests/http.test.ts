@@ -48,13 +48,26 @@ describe("local HTTP server", () => {
       version: "0.1.0",
       database: {
         status: "ready",
-        schemaVersion: 8,
+        schemaVersion: 9,
       },
       telegram: {
         status: "unavailable",
         reason: "Исполняемый файл Telegram не настроен или недоступен.",
       },
     });
+  });
+
+  it("reads and updates the persisted control-notification setting", async () => {
+    const root = await mkdtemp(join(tmpdir(), "website-change-monitor-")); roots.push(root);
+    const database = openApplicationDatabase({ rootDirectory: root }); databases.push(database);
+    const server = buildHttpServer({ database, version: "0.1.0", port: 43117 }); servers.push(server);
+    const headers = { host: "127.0.0.1:43117" };
+
+    expect((await server.inject({ method: "GET", url: "/api/settings/notifications", headers })).json()).toEqual({ notifyWhenUnchanged: false });
+    const updated = await server.inject({ method: "PUT", url: "/api/settings/notifications", headers, payload: { notifyWhenUnchanged: true } });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json()).toEqual({ notifyWhenUnchanged: true });
+    expect((await server.inject({ method: "GET", url: "/api/settings/notifications", headers })).json()).toEqual({ notifyWhenUnchanged: true });
   });
 
   it("serves the built React entry page from the same process", async () => {

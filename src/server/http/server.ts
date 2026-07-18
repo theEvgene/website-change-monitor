@@ -25,6 +25,7 @@ import {
   checkIntentListResponseSchemaV1,
   notificationEventSchemaV1,
   notificationFeedSchemaV1,
+  notificationSettingsSchemaV1,
   createMonitorRouteSchema,
   getMonitorRouteSchema,
   getComparisonRouteSchema,
@@ -39,6 +40,8 @@ import {
   telegramStateSchemaV1,
   getTelegramStateRouteSchema,
   recheckTelegramRouteSchema,
+  getNotificationSettingsRouteSchema,
+  updateNotificationSettingsRouteSchema,
   monitorCheckListResponseSchemaV1,
   monitorCheckSchemaV1,
   monitorCreateRequestSchemaV1,
@@ -207,6 +210,7 @@ export function buildHttpServer(
     apiServer.addSchema(checkIntentListResponseSchemaV1);
     apiServer.addSchema(notificationEventSchemaV1);
     apiServer.addSchema(notificationFeedSchemaV1);
+    apiServer.addSchema(notificationSettingsSchemaV1);
     apiServer.addSchema(telegramStateSchemaV1);
 
     apiServer.get("/api/health", { schema: healthRouteSchema }, async () => {
@@ -228,6 +232,11 @@ export function buildHttpServer(
 
     apiServer.get("/api/telegram", { schema: getTelegramStateRouteSchema }, async () => telegram.state());
     apiServer.post("/api/telegram/recheck", { schema: recheckTelegramRouteSchema }, async () => telegram.recheck());
+    apiServer.get("/api/settings/notifications", { schema: getNotificationSettingsRouteSchema }, async () => options.database.monitors.notificationSettings());
+    apiServer.put<{ Body: { notifyWhenUnchanged: boolean } }>("/api/settings/notifications", { schema: updateNotificationSettingsRouteSchema }, async (request) => {
+      options.database.monitors.updateNotificationSettings(request.body.notifyWhenUnchanged);
+      return options.database.monitors.notificationSettings();
+    });
 
     apiServer.get("/api/version", { schema: versionRouteSchema }, async () => ({
       application: applicationId,
@@ -484,7 +493,7 @@ export function buildHttpServer(
           }
         }
         const flushLive = () => {
-          const feed = monitors.listNotifications(cursor);
+          const feed = monitors.listLiveNotifications(cursor);
           for (const event of feed.items) {
             reply.raw.write(`id: ${event.id}\nevent: notification\ndata: ${JSON.stringify(event)}\n\n`);
             rememberDelivery(event);

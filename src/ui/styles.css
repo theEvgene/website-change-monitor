@@ -38,6 +38,10 @@ input {
   border-bottom: 3px solid #2e73d2;
 }
 
+.topbar-actions { display: flex; align-items: flex-end; gap: 1rem; flex-direction: column; }
+.notification-switch { display: flex; align-items: center; gap: .65rem; font-size: .86rem; font-weight: 700; }
+.notification-switch input { width: 2.4rem; height: 1.25rem; accent-color: var(--accent); }
+
 .top-navigation {
   display: flex;
   gap: 4px;

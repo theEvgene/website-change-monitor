@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 
 import { ComparisonModal, loadComparison, type ComparisonResponse } from "./ComparisonModal.js";
+import { telegramDeliveryLabel, type TelegramDeliveryView } from "./telegram-delivery.js";
 
 interface NotificationEvent {
   id: number;
-  kind: "change_detected" | "check_failed_final";
+  kind: "change_detected" | "check_failed_final" | "control_check_ok";
+  centerVisible: boolean;
   monitorId: number;
   monitorName: string;
   scopeRevision: number;
@@ -15,7 +17,7 @@ interface NotificationEvent {
   observedAt: string;
   targetPath: string;
   dedupeKey: string;
-  telegram: { state: "pending" | "sending" | "delivered" | "unavailable" | "permanent" | "temporary" | "timeout" | "abandoned"; failureReason: string | null };
+  telegram: TelegramDeliveryView;
 }
 
 interface NotificationFeed { highWaterMark: number; items: NotificationEvent[] }
@@ -38,14 +40,14 @@ export function NotificationsWorkspace({ centerVisible, selectedCheckId, onOpenJ
         return await response.json() as NotificationFeed;
       })
       .then((feed) => {
-        setItems(feed.items);
+        setItems(feed.items.filter((event) => event.centerVisible));
         feed.items.forEach((event) => popupSeen.current.add(event.id));
         if (typeof EventSource === "undefined") return;
         source = new EventSource(`/api/notifications/stream?after=${feed.highWaterMark}`);
         source.addEventListener("replay", (message) => append(JSON.parse((message as MessageEvent<string>).data) as NotificationEvent, false));
         source.addEventListener("reset", (message) => {
           const reset = JSON.parse((message as MessageEvent<string>).data) as NotificationFeed;
-          setItems(reset.items); reset.items.forEach((event) => popupSeen.current.add(event.id));
+          setItems(reset.items.filter((event) => event.centerVisible)); reset.items.forEach((event) => popupSeen.current.add(event.id));
         });
         source.addEventListener("notification", (message) => {
           const event = JSON.parse((message as MessageEvent<string>).data) as NotificationEvent;
@@ -83,7 +85,7 @@ export function NotificationsWorkspace({ centerVisible, selectedCheckId, onOpenJ
       <tbody>{[...items].reverse().map((event) => <tr key={event.id}>
         <td>{new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" }).format(new Date(event.observedAt))}</td>
         <td>{event.monitorName}</td><td><strong>{event.title}</strong><br />{event.body}</td>
-        <td>{telegramLabel(event.telegram.state)}{event.telegram.failureReason === null ? null : <small>{event.telegram.failureReason}</small>}</td>
+        <td>{telegramDeliveryLabel(event.telegram.state)}{event.telegram.failureReason === null ? null : <small>{event.telegram.failureReason}</small>}</td>
         <td>{event.kind === "change_detected"
           ? <button className="table-link" type="button" onClick={() => void openComparison(event.checkId)}>Открыть Сравнение</button>
           : <button className="table-link" type="button" onClick={() => onOpenJournal(event.checkId)}>Открыть Проверку</button>}</td>
@@ -93,7 +95,7 @@ export function NotificationsWorkspace({ centerVisible, selectedCheckId, onOpenJ
   </section>{toast === null ? null : <div className="status-panel" role="status"><strong>{toast.title}</strong><p>{toast.body}</p><button type="button" onClick={() => setToast(null)}>Закрыть</button></div>}</>;
 
   function append(event: NotificationEvent, live: boolean) {
-    setItems((current) => current.some((item) => item.id === event.id) ? current : [...current, event]);
+    if (event.centerVisible) setItems((current) => current.some((item) => item.id === event.id) ? current : [...current, event]);
     if (!live || popupSeen.current.has(event.id)) { popupSeen.current.add(event.id); return; }
     popupSeen.current.add(event.id); deliverBrowserNotification(event, setToast);
   }
@@ -132,10 +134,4 @@ function permissionLabel(permission: NotificationPermission | "unsupported"): st
   if (permission === "denied") return "Уведомления браузера запрещены в настройках.";
   if (permission === "unsupported") return "Уведомления браузера не поддерживаются.";
   return "Разрешение браузера ещё не запрошено.";
-}
-
-function telegramLabel(state: NotificationEvent["telegram"]["state"]): string {
-  if (state === "pending" || state === "sending") return "Отправляется";
-  if (state === "delivered") return "Отправлено";
-  return "Не отправлено";
 }

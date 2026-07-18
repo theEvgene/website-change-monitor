@@ -11,6 +11,7 @@ import { retriesAndPauseMigration } from "./migrations/005-retries-and-pause.js"
 import { monitorManagementMigration } from "./migrations/006-monitor-management.js";
 import { notificationsMigration } from "./migrations/007-notifications.js";
 import { telegramDeliveryMigration } from "./migrations/008-telegram-delivery.js";
+import { controlNotificationsMigration } from "./migrations/009-control-notifications.js";
 import { createMonitorStore, type MonitorStore } from "./monitor-store.js";
 
 export interface DatabaseDiagnostics {
@@ -50,6 +51,7 @@ const migrations = [
   monitorManagementMigration,
   notificationsMigration,
   telegramDeliveryMigration,
+  controlNotificationsMigration,
 ];
 
 export function openApplicationDatabase(

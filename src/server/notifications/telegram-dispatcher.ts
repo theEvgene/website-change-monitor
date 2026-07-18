@@ -83,7 +83,7 @@ export function createTelegramDispatcher(options: {
 function payload(job: TelegramDeliveryJob) {
   return {
     monitor_id: truncate(job.monitorName.trim().normalize("NFC") || "monitor", 100),
-    status: job.kind === "change_detected" ? "warning" : "error",
+    status: job.kind === "change_detected" ? "warning" : job.kind === "control_check_ok" ? "success" : "error",
     observed_at: job.observedAt,
     message: truncate(`${job.title}\nURL: ${safeUrl(job.url)}\n${job.body}`, 3_000),
   };

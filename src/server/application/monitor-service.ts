@@ -9,6 +9,7 @@ import type {
   JournalCheckRecord,
   MonitorRecord,
   MonitorSummaryRecord,
+  NotificationFeed,
 } from "../persistence/monitor-store.js";
 import type { PagePreview, PageProbe } from "./page-probe.js";
 import { PageProbeError } from "./page-probe.js";
@@ -89,6 +90,7 @@ export interface MonitorService {
   listMonitors(label?: string): MonitorSummary[];
   listJournal(): JournalCheckRecord[];
   listActiveIntents(): CheckIntentRecord[];
+  listNotifications(afterId?: number): NotificationFeed;
   getComparison(id: number):
     | (SnapshotComparison & {
         checkId: number;
@@ -274,6 +276,7 @@ export function createMonitorService(options: {
     listMonitors: (label) => options.database.monitors.listMonitors(label),
     listJournal: () => options.database.monitors.listJournal(),
     listActiveIntents: () => options.database.monitors.listActiveIntents(),
+    listNotifications: (afterId) => options.database.monitors.listNotifications(afterId),
     getComparison(id) {
       const pair = options.database.monitors.getComparison(id);
       if (pair === undefined) return undefined;

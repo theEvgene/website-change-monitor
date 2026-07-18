@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { PreviewPanel } from "./PreviewPanel.js";
 import { MonitorsWorkspace } from "./MonitorsWorkspace.js";
 import { JournalWorkspace } from "./JournalWorkspace.js";
+import { NotificationsWorkspace } from "./NotificationsWorkspace.js";
 
 interface HealthResponse {
   application: "website-change-monitor";
@@ -32,7 +33,8 @@ type HealthState =
 export function App() {
   const [state, setState] = useState<HealthState>({ kind: "loading" });
   const [monitorRefresh, setMonitorRefresh] = useState(0);
-  const [activeSection, setActiveSection] = useState<"monitors" | "journal" | "notifications">("monitors");
+  const [activeSection, setActiveSection] = useState<"monitors" | "journal" | "notifications">(sectionFromLocation);
+  const [selectedCheckId, setSelectedCheckId] = useState<number | undefined>(() => checkFromLocation());
 
   useEffect(() => {
     const controller = new AbortController();
@@ -67,6 +69,12 @@ export function App() {
       });
 
     return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    const navigate = () => { setActiveSection(sectionFromLocation()); setSelectedCheckId(checkFromLocation()); };
+    window.addEventListener("popstate", navigate);
+    return () => window.removeEventListener("popstate", navigate);
   }, []);
 
   return (
@@ -138,11 +146,24 @@ export function App() {
         <PreviewPanel onMonitorCreated={() => setMonitorRefresh((value) => value + 1)} />
         <MonitorsWorkspace refreshToken={monitorRefresh} />
         </> : null}
-        {activeSection === "journal" ? <JournalWorkspace /> : null}
-        {activeSection === "notifications" ? (
-          <section className="journal-panel"><p className="eyebrow">Каналы доставки</p><h2>Уведомления</h2><p className="muted">История доставки появится в следующем этапе MVP.</p></section>
-        ) : null}
+        {activeSection === "journal" ? <JournalWorkspace selectedCheckId={selectedCheckId} /> : null}
+        <NotificationsWorkspace centerVisible={activeSection === "notifications"} selectedCheckId={selectedCheckId} onOpenJournal={(checkId) => navigateTo("journal", checkId)} />
       </main>
     </div>
   );
+
+  function navigateTo(section: "journal" | "notifications", checkId: number) {
+    window.history.pushState({}, "", `/?section=${section}&check=${checkId}`);
+    setActiveSection(section); setSelectedCheckId(checkId);
+  }
+}
+
+function sectionFromLocation(): "monitors" | "journal" | "notifications" {
+  const section = new URLSearchParams(window.location.search).get("section");
+  return section === "journal" || section === "notifications" ? section : "monitors";
+}
+
+function checkFromLocation(): number | undefined {
+  const value = Number(new URLSearchParams(window.location.search).get("check"));
+  return Number.isSafeInteger(value) && value > 0 ? value : undefined;
 }

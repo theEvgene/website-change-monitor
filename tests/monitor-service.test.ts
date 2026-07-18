@@ -275,6 +275,35 @@ describe("Monitor use case", () => {
       beforeSnapshotId: 1,
       afterSnapshotId: 2,
     });
+    expect(service.listNotifications()).toEqual({
+      highWaterMark: 1,
+      items: [expect.objectContaining({
+        id: 1, kind: "change_detected", monitorId: monitor.id,
+        monitorName: "Catalog", scopeRevision: 1,
+        checkId: result!.history[0]!.id, chainCheckId: result!.history[0]!.id,
+        title: "Обнаружено изменение",
+        body: "Монитор «Catalog»: страница изменилась.",
+        targetPath: `/?section=notifications&check=${result!.history[0]!.id}`,
+        dedupeKey: `change:${result!.history[0]!.id}`,
+      })],
+    });
+  });
+
+  it("does not commit a Change or Snapshot when its Notification transaction fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "website-change-monitor-")); roots.push(root);
+    const database = openApplicationDatabase({ rootDirectory: root }); databases.push(database);
+    const baseline = successfulPageProbeResult("https://example.com", [{ selector: "body", matchCount: 1 }], simplePagePreviewTargets("A"));
+    const changed = successfulPageProbeResult("https://example.com", [{ selector: "body", matchCount: 1 }], simplePagePreviewTargets("B"));
+    const preview = vi.fn<PageProbe["preview"]>().mockResolvedValueOnce(baseline).mockResolvedValueOnce(baseline).mockResolvedValueOnce(changed);
+    const service = createMonitorService({ database, pageProbe: { preview } });
+    const monitor = await service.createMonitor({ name: "Atomic", url: "https://example.com", targetSelectors: ["body"], exclusionSelectors: [], intervalHours: 6 });
+    const raw = new BetterSqlite3(database.path);
+    raw.exec("CREATE TRIGGER reject_notification BEFORE INSERT ON notification_events BEGIN SELECT RAISE(ABORT, 'rejected'); END"); raw.close();
+
+    const result = await service.requestManualCheck(monitor.id);
+
+    expect(result?.history).toMatchObject([{ result: "error", snapshot: null }, { result: "baseline", snapshot: { id: 1 } }]);
+    expect(service.listNotifications()).toEqual({ highWaterMark: 0, items: [] });
   });
 
   it("coalesces concurrent manual requests into one durable Check", async () => {
@@ -761,10 +790,12 @@ describe("Monitor use case", () => {
         { result: "baseline" },
       ],
     });
+    expect(service.listNotifications().items).toEqual([]);
 
     now = new Date("2026-07-17T14:01:00.000Z");
     await service.runAvailableChecks();
-    expect(service.getMonitor(monitor.id)).toMatchObject({
+    const finalState = service.getMonitor(monitor.id)!;
+    expect(finalState).toMatchObject({
       nextCheckAt: "2026-07-17T20:01:00.000Z",
       activeIntent: { kind: "scheduled", state: "queued" },
       history: [
@@ -773,6 +804,15 @@ describe("Monitor use case", () => {
         { result: "baseline" },
       ],
     });
+    expect(service.listNotifications().items).toEqual([
+      expect.objectContaining({
+        kind: "check_failed_final", monitorName: "Catalog",
+        title: "Проверка завершилась ошибкой",
+        body: "Монитор «Catalog»: Страница не ответила.",
+        chainCheckId: finalState.history[1]!.id,
+        dedupeKey: `final-error:${finalState.history[1]!.id}`,
+      }),
+    ]);
   });
 
   it("recovers an interrupted Check as an error with exactly one retry", async () => {

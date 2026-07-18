@@ -37,6 +37,8 @@ describe("public HTTP contract", () => {
       "/api/monitors/{monitorId}/checks",
       "/api/monitors/{monitorId}/pause",
       "/api/monitors/{monitorId}/resume",
+      "/api/notifications",
+      "/api/notifications/stream",
       "/api/preview",
       "/api/version",
     ]);
@@ -67,6 +69,8 @@ describe("public HTTP contract", () => {
     expect(document.paths["/api/monitors/{monitorId}/pause"]?.post?.operationId).toBe("pauseMonitor");
     expect(document.paths["/api/monitors/{monitorId}/resume"]?.post?.operationId).toBe("resumeMonitor");
     expect(document.paths["/api/version"]?.get?.operationId).toBe("getVersion");
+    expect(document.paths["/api/notifications"]?.get?.operationId).toBe("listNotifications");
+    expect(document.paths["/api/notifications/stream"]?.get?.operationId).toBe("streamNotifications");
     expect(Object.keys(document.components.schemas).sort()).toEqual([
       "ApiErrorV1",
       "CheckIntentListResponseV1",
@@ -83,6 +87,8 @@ describe("public HTTP contract", () => {
       "MonitorListResponseV1",
       "MonitorSummaryV1",
       "MonitorUpdateRequestV1",
+      "NotificationEventV1",
+      "NotificationFeedV1",
       "PreviewRequestV1",
       "PreviewResponseV1",
       "VersionResponseV1",

@@ -186,6 +186,19 @@ describe("Monitors HTTP API", () => {
     const changedCheckId = checked.json<{ history: Array<{ id: number }> }>()
       .history[0]!.id;
 
+    const notifications = await server.inject({
+      method: "GET", url: "/api/notifications", headers: { host: "127.0.0.1:43117" },
+    });
+    expect(notifications.statusCode).toBe(200);
+    expect(notifications.json()).toMatchObject({
+      highWaterMark: 1,
+      items: [{ id: 1, kind: "change_detected", checkId: changedCheckId, monitorName: "Catalog" }],
+    });
+    const replayCursor = await server.inject({
+      method: "GET", url: "/api/notifications?after=1", headers: { host: "127.0.0.1:43117" },
+    });
+    expect(replayCursor.json()).toEqual({ highWaterMark: 1, items: [] });
+
     const journal = await server.inject({
       method: "GET",
       url: "/api/checks",

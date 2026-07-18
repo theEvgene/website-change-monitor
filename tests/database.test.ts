@@ -32,7 +32,7 @@ describe("application database", () => {
     expect(database.path.startsWith(root)).toBe(true);
     expect(database.diagnostics()).toEqual({
       status: "ready",
-      schemaVersion: 6,
+      schemaVersion: 7,
       journalMode: "wal",
       foreignKeys: true,
       synchronous: "full",

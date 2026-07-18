@@ -95,11 +95,16 @@ export const healthResponseSchemaV1 = {
       type: "object",
       additionalProperties: false,
       required: ["status", "reason"],
-      properties: {
-        status: { const: "unavailable", type: "string" },
-        reason: { const: "not_configured", type: "string" },
-      },
+      properties: { status: { enum: ["available", "unavailable"], type: "string" }, reason: { type: ["string", "null"] } },
     },
+  },
+} as const;
+
+export const telegramStateSchemaV1 = {
+  $id: "TelegramStateV1", type: "object", additionalProperties: false,
+  required: ["status", "reason"], properties: {
+    status: { enum: ["available", "unavailable"], type: "string" },
+    reason: { type: ["string", "null"] },
   },
 } as const;
 
@@ -334,14 +339,19 @@ export const checkIntentListResponseSchemaV1 = {
 
 export const notificationEventSchemaV1 = {
   $id: "NotificationEventV1", type: "object", additionalProperties: false,
-  required: ["id", "kind", "monitorId", "monitorName", "scopeRevision", "checkId", "chainCheckId", "title", "body", "observedAt", "targetPath", "dedupeKey"],
+  required: ["id", "kind", "monitorId", "monitorName", "url", "scopeRevision", "checkId", "chainCheckId", "title", "body", "observedAt", "targetPath", "dedupeKey", "telegram"],
   properties: {
     id: { type: "integer", minimum: 1 },
     kind: { enum: ["change_detected", "check_failed_final"], type: "string" },
     monitorId: { type: "integer", minimum: 1 }, monitorName: { type: "string" },
+    url: { type: "string" },
     scopeRevision: { type: "integer", minimum: 1 }, checkId: { type: "integer", minimum: 1 },
     chainCheckId: { type: "integer", minimum: 1 }, title: { type: "string" }, body: { type: "string" },
     observedAt: { type: "string", format: "date-time" }, targetPath: { type: "string" }, dedupeKey: { type: "string" },
+    telegram: { type: "object", additionalProperties: false, required: ["state", "failureReason"], properties: {
+      state: { enum: ["pending", "sending", "delivered", "unavailable", "permanent", "temporary", "timeout", "abandoned"], type: "string" },
+      failureReason: { type: ["string", "null"] },
+    } },
   },
 } as const;
 
@@ -696,6 +706,15 @@ export const streamNotificationsRouteSchema: FastifySchema = {
   operationId: "streamNotifications", summary: "Подключиться к потоку новых Уведомлений",
   querystring: notificationAfterQuery,
   response: { 200: { type: "string", description: "Server-Sent Events с id и JSON data" }, 400: { $ref: "ApiErrorV1#" }, ...commonErrors },
+};
+
+export const getTelegramStateRouteSchema: FastifySchema = {
+  operationId: "getTelegramState", summary: "Получить доступность Telegram",
+  response: { 200: { $ref: "TelegramStateV1#" }, ...commonErrors },
+};
+export const recheckTelegramRouteSchema: FastifySchema = {
+  operationId: "recheckTelegram", summary: "Повторно проверить доступность Telegram",
+  response: { 200: { $ref: "TelegramStateV1#" }, ...commonErrors },
 };
 
 export const getComparisonRouteSchema: FastifySchema = {

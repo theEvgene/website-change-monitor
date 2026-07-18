@@ -40,6 +40,8 @@ describe("public HTTP contract", () => {
       "/api/notifications",
       "/api/notifications/stream",
       "/api/preview",
+      "/api/telegram",
+      "/api/telegram/recheck",
       "/api/version",
     ]);
     expect(document.paths["/api/health"]?.get?.operationId).toBe("getHealth");
@@ -71,6 +73,8 @@ describe("public HTTP contract", () => {
     expect(document.paths["/api/version"]?.get?.operationId).toBe("getVersion");
     expect(document.paths["/api/notifications"]?.get?.operationId).toBe("listNotifications");
     expect(document.paths["/api/notifications/stream"]?.get?.operationId).toBe("streamNotifications");
+    expect(document.paths["/api/telegram"]?.get?.operationId).toBe("getTelegramState");
+    expect(document.paths["/api/telegram/recheck"]?.post?.operationId).toBe("recheckTelegram");
     expect(Object.keys(document.components.schemas).sort()).toEqual([
       "ApiErrorV1",
       "CheckIntentListResponseV1",
@@ -91,6 +95,7 @@ describe("public HTTP contract", () => {
       "NotificationFeedV1",
       "PreviewRequestV1",
       "PreviewResponseV1",
+      "TelegramStateV1",
       "VersionResponseV1",
     ]);
     expect(document.components.schemas.PreviewRequestV1).toMatchObject({

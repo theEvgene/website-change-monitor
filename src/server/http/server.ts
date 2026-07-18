@@ -14,6 +14,7 @@ import {
 } from "../application/monitor-service.js";
 import { previewPage, PreviewInputError } from "../application/preview-page.js";
 import type { ApplicationDatabase } from "../persistence/database.js";
+import { createTelegramDispatcher } from "../notifications/telegram-dispatcher.js";
 import {
   apiError,
   apiErrorSchemaV1,
@@ -35,6 +36,9 @@ import {
   listMonitorsRouteSchema,
   listNotificationsRouteSchema,
   streamNotificationsRouteSchema,
+  telegramStateSchemaV1,
+  getTelegramStateRouteSchema,
+  recheckTelegramRouteSchema,
   monitorCheckListResponseSchemaV1,
   monitorCheckSchemaV1,
   monitorCreateRequestSchemaV1,
@@ -66,6 +70,8 @@ export interface BuildHttpServerOptions {
   workerIntervalMs?: number;
   workerShutdownMs?: number;
   orchestrationTimeoutMs?: number;
+  telegramDeadlineMs?: number;
+  telegramAvailabilityDeadlineMs?: number;
 }
 
 export function buildHttpServer(
@@ -73,17 +79,26 @@ export function buildHttpServer(
 ): FastifyInstance {
   const server = Fastify({ logger: false, trustProxy: false });
   const pageProbe = options.pageProbe ?? unavailablePageProbe;
+  const telegram = createTelegramDispatcher({
+    store: options.database.monitors,
+    executablePath: () => options.database.telegramExecutablePath(),
+    ...(options.telegramDeadlineMs === undefined ? {} : { deadlineMs: options.telegramDeadlineMs }),
+    ...(options.telegramAvailabilityDeadlineMs === undefined ? {} : { availabilityDeadlineMs: options.telegramAvailabilityDeadlineMs }),
+  });
   const monitors = createMonitorService({
     database: options.database,
     pageProbe,
     ...(options.orchestrationTimeoutMs === undefined
       ? {}
       : { orchestrationTimeoutMs: options.orchestrationTimeoutMs }),
+    beforeNotificationCommit: async () => { await telegram.ensureAvailable(); },
+    afterNotificationCommits: () => { void telegram.drain(); },
   });
   let workerTimer: ReturnType<typeof setInterval> | undefined;
   const notificationStreams = new Set<ServerResponse>();
 
   server.addHook("onReady", async () => {
+    await telegram.initialize();
     await monitors.runAvailableChecks();
     workerTimer = setInterval(() => {
       void monitors.runAvailableChecks();
@@ -95,7 +110,8 @@ export function buildHttpServer(
     if (workerTimer !== undefined) clearInterval(workerTimer);
     for (const stream of notificationStreams) stream.end();
     notificationStreams.clear();
-    await monitors.stop(options.workerShutdownMs ?? 8_000);
+    const shutdownMs = options.workerShutdownMs ?? 8_000;
+    await Promise.all([monitors.stop(shutdownMs), telegram.stop(shutdownMs)]);
   });
 
   server.addHook("onRequest", async (request, reply) => {
@@ -191,23 +207,27 @@ export function buildHttpServer(
     apiServer.addSchema(checkIntentListResponseSchemaV1);
     apiServer.addSchema(notificationEventSchemaV1);
     apiServer.addSchema(notificationFeedSchemaV1);
+    apiServer.addSchema(telegramStateSchemaV1);
 
     apiServer.get("/api/health", { schema: healthRouteSchema }, async () => {
       const database = options.database.diagnostics();
+      const telegramState = telegram.state();
       return {
         application: applicationId,
-        status: "degraded" as const,
+        status: telegramState.status === "available" ? "ready" as const : "degraded" as const,
         version: options.version,
         database: {
           status: database.status,
           schemaVersion: database.schemaVersion,
         },
-        telegram: {
-          status: "unavailable" as const,
-          reason: "not_configured" as const,
-        },
+        telegram: telegramState.status === "available"
+          ? { status: "available" as const, reason: null }
+          : { status: "unavailable" as const, reason: telegramState.reason },
       };
     });
+
+    apiServer.get("/api/telegram", { schema: getTelegramStateRouteSchema }, async () => telegram.state());
+    apiServer.post("/api/telegram/recheck", { schema: recheckTelegramRouteSchema }, async () => telegram.recheck());
 
     apiServer.get("/api/version", { schema: versionRouteSchema }, async () => ({
       application: applicationId,
@@ -430,24 +450,54 @@ export function buildHttpServer(
           "x-accel-buffering": "no",
         });
         notificationStreams.add(reply.raw);
+        const inFlightDeliveries = new Map<number, string>();
+        const rememberDelivery = (event: { id: number; telegram: { state: string } }) => {
+          if (event.telegram.state === "pending" || event.telegram.state === "sending") {
+            inFlightDeliveries.set(event.id, event.telegram.state);
+          } else {
+            inFlightDeliveries.delete(event.id);
+          }
+        };
         const lastEventId = Number(request.headers["last-event-id"]);
         let cursor = Number.isSafeInteger(lastEventId) && lastEventId >= 0 ? lastEventId : (request.query.after ?? 0);
         const initial = monitors.listNotifications(cursor);
         if (cursor > initial.highWaterMark) {
           const reset = monitors.listNotifications(0);
           reply.raw.write(`event: reset\ndata: ${JSON.stringify(reset)}\n\n`);
+          reset.items.forEach(rememberDelivery);
           cursor = reset.highWaterMark;
         } else {
           for (const event of initial.items) {
             reply.raw.write(`id: ${event.id}\nevent: replay\ndata: ${JSON.stringify(event)}\n\n`);
+            rememberDelivery(event);
             cursor = event.id;
+          }
+        }
+        monitors.listNotifications(0).items
+          .filter((event) => event.id <= cursor)
+          .forEach(rememberDelivery);
+        if (cursor > 0) {
+          const currentAtCursor = monitors.listNotifications(cursor - 1).items.find((event) => event.id === cursor);
+          if (currentAtCursor !== undefined) {
+            reply.raw.write(`id: ${currentAtCursor.id}\nevent: delivery\ndata: ${JSON.stringify(currentAtCursor)}\n\n`);
+            rememberDelivery(currentAtCursor);
           }
         }
         const flushLive = () => {
           const feed = monitors.listNotifications(cursor);
           for (const event of feed.items) {
             reply.raw.write(`id: ${event.id}\nevent: notification\ndata: ${JSON.stringify(event)}\n\n`);
+            rememberDelivery(event);
             cursor = event.id;
+          }
+          for (const [eventId, previousState] of inFlightDeliveries) {
+            const current = monitors.listNotifications(eventId - 1).items.find((event) => event.id === eventId);
+            if (current === undefined) {
+              inFlightDeliveries.delete(eventId);
+            } else if (current.telegram.state !== previousState) {
+              reply.raw.write(`id: ${current.id}\nevent: delivery\ndata: ${JSON.stringify(current)}\n\n`);
+              rememberDelivery(current);
+            }
           }
         };
         const timer = setInterval(() => { flushLive(); reply.raw.write(": keep-alive\n\n"); }, 1_000);

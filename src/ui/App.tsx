@@ -14,8 +14,8 @@ interface HealthResponse {
     schemaVersion: number;
   };
   telegram: {
-    status: "unavailable";
-    reason: "not_configured";
+    status: "available" | "unavailable";
+    reason: string | null;
   };
 }
 
@@ -77,6 +77,22 @@ export function App() {
     return () => window.removeEventListener("popstate", navigate);
   }, []);
 
+  useEffect(() => {
+    const refresh = () => {
+      void fetch("/api/telegram", { headers: { accept: "application/json" } })
+        .then(async (response) => response.ok ? await response.json() as HealthResponse["telegram"] : undefined)
+        .then((telegram) => {
+          if (telegram === undefined) return;
+          setState((current) => current.kind === "loaded"
+            ? { ...current, health: { ...current.health, status: telegram.status === "available" ? "ready" : "degraded", telegram } }
+            : current);
+        })
+        .catch(() => undefined);
+    };
+    const timer = window.setInterval(refresh, 5_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -94,6 +110,14 @@ export function App() {
         <button type="button" aria-current={activeSection === "journal" ? "page" : undefined} onClick={() => setActiveSection("journal")}>Журнал</button>
         <button type="button" aria-current={activeSection === "notifications" ? "page" : undefined} onClick={() => setActiveSection("notifications")}>Уведомления</button>
       </nav>
+      {state.kind === "loaded" && state.health.telegram.status === "unavailable" ? (
+        <section className="telegram-banner" role="alert">
+          <strong>Telegram недоступен</strong>
+          <span>{state.health.telegram.reason ?? "Канал не настроен."}</span>
+          <button type="button" onClick={() => void recheckTelegram()}>Проверить снова</button>
+          <code>npm run doctor</code>
+        </section>
+      ) : null}
 
       <main>
         {activeSection === "monitors" ? <>
@@ -133,10 +157,10 @@ export function App() {
                   </div>
                 </article>
                 <article className="component-card">
-                  <span className="component-dot component-dot--warning" />
+                  <span className={`component-dot ${state.health.telegram.status === "available" ? "component-dot--ready" : "component-dot--warning"}`} />
                   <div>
                     <h3>Канал уведомлений</h3>
-                    <p>Telegram пока не настроен</p>
+                    <p>{state.health.telegram.status === "available" ? "Telegram доступен" : "Telegram пока не настроен"}</p>
                   </div>
                 </article>
               </div>
@@ -155,6 +179,13 @@ export function App() {
   function navigateTo(section: "journal" | "notifications", checkId: number) {
     window.history.pushState({}, "", `/?section=${section}&check=${checkId}`);
     setActiveSection(section); setSelectedCheckId(checkId);
+  }
+
+  async function recheckTelegram() {
+    const response = await fetch("/api/telegram/recheck", { method: "POST", headers: { accept: "application/json" } });
+    if (!response.ok || state.kind !== "loaded") return;
+    const telegram = await response.json() as HealthResponse["telegram"];
+    setState({ ...state, health: { ...state.health, status: telegram.status === "available" ? "ready" : "degraded", telegram } });
   }
 }
 

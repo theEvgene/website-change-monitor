@@ -210,6 +210,24 @@ $feed.items | Format-Table id, kind, monitorName, observedAt, targetPath
 curl.exe --no-buffer --header "Accept: text/event-stream" "http://127.0.0.1:43117/api/notifications/stream?after=0"
 ```
 
+### Telegram best effort
+
+Установленный `telegram-alert-bus` 0.1.5 настраивается отдельно и подключается только абсолютным путём к executable:
+
+```powershell
+npm run configure -- --telegram-executable 'C:\absolute\path\.venv\Scripts\telegram-alert.exe'
+```
+
+Приложение напрямую, без shell, запускает `telegram-alert.exe send`, передаёт строгий UTF-8 JSON через stdin с `PYTHONUTF8=1` и завершает зависший процесс через 70 секунд. Собственных повторов и очереди поверх sender нет. Ограниченная диагностика stdout/stderr сохраняется с удалением Telegram-токенов; секрет остаётся в Windows Credential Manager модуля.
+
+- `GET /api/telegram` — текущая доступность канала;
+- `POST /api/telegram/recheck` — явная повторная проверка из плашки «Telegram недоступен»;
+- поле `telegram` каждого элемента `GET /api/notifications` хранит окончательное состояние доставки.
+
+SSE-событие `delivery` обновляет уже показанное Уведомление с тем же `id`, когда отправка переходит из `pending`/`sending` в окончательное состояние.
+
+`pending`/`sending` отображаются как «Отправляется», `delivered` — «Отправлено», остальные состояния — «Не отправлено» с безопасной причиной. Старые неуспехи и доставки прошлого запуска не отправляются после восстановления; восстановленный канал используется только новыми Уведомлениями. Недоступный Telegram оставляет приложение и Проверки рабочими, а `doctor` возвращает degraded exit code 2.
+
 ## Формат ответов
 
 Успешная операция возвращает описанный в OpenAPI типизированный JSON-объект. Например, `GET /api/version`:

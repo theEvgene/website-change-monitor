@@ -1,8 +1,9 @@
-import { constants, existsSync, statSync } from "node:fs";
+import { constants, existsSync } from "node:fs";
 import { access, stat } from "node:fs/promises";
 import { createServer } from "node:net";
-import { dirname, isAbsolute } from "node:path";
+import { dirname } from "node:path";
 
+import { inspectTelegramExecutable } from "../notifications/telegram-dispatcher.js";
 import { inspectApplicationDatabase } from "../persistence/database.js";
 import { isWebsiteChangeMonitorAtPort } from "./instance.js";
 
@@ -29,7 +30,7 @@ type TelegramCheck =
   | {
       name: "telegram";
       status: "degraded";
-      code: "not_configured";
+      code: "not_configured" | "unavailable";
     };
 
 type FatalCheck = {
@@ -54,6 +55,7 @@ export interface RunDoctorOptions {
   rootDirectory: string;
   port: number;
   runtime: RuntimeFacts;
+  inspectTelegram?: (executablePath: string | null) => Promise<boolean>;
 }
 
 export async function runDoctor(
@@ -86,15 +88,13 @@ export async function runDoctor(
   }
 
   checks.push(await checkPort(options.port));
-  checks.push(
-    isUsableTelegramExecutable(telegramExecutablePath)
-      ? { name: "telegram", status: "ready" }
-      : {
-          name: "telegram",
-          status: "degraded",
-          code: "not_configured",
-        },
-  );
+  const telegramConfigured = telegramExecutablePath !== null;
+  const telegramAvailable = await (options.inspectTelegram
+    ? options.inspectTelegram(telegramExecutablePath)
+    : inspectTelegramExecutable(telegramExecutablePath).then((state) => state.status === "available"));
+  checks.push(telegramAvailable
+    ? { name: "telegram", status: "ready" }
+    : { name: "telegram", status: "degraded", code: telegramConfigured ? "unavailable" : "not_configured" });
 
   if (checks.some((check) => check.status === "fatal")) {
     return { status: "fatal", exitCode: 1, checks };
@@ -134,13 +134,6 @@ async function checkDataRoot(rootDirectory: string): Promise<DoctorCheck> {
   } catch {
     return { name: "data", status: "fatal", code: "root_not_writable" };
   }
-}
-
-function isUsableTelegramExecutable(path: string | null): boolean {
-  if (path === null || !isAbsolute(path) || !existsSync(path)) {
-    return false;
-  }
-  return statSync(path).isFile();
 }
 
 function validateRuntime(runtime: RuntimeFacts): string | undefined {

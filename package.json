@@ -13,6 +13,7 @@
     "dev": "tsx src/server/cli.ts start",
     "doctor": "node dist/server/cli.js doctor",
     "doctor:dev": "tsx src/server/cli.ts doctor",
+    "configure": "tsx src/server/cli.ts configure",
     "install:chromium": "playwright install chromium",
     "start": "node dist/server/cli.js start",
     "test": "vitest run",

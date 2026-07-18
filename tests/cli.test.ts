@@ -38,7 +38,7 @@ describe("command line", () => {
     }
   });
 
-  it("prints a ready doctor report and exits with code 0 when Telegram is configured", async () => {
+  it("reports a configured but unusable Telegram executable as degraded", async () => {
     const localAppData = await mkdtemp(
       join(tmpdir(), "website-change-monitor-localappdata-"),
     );
@@ -61,16 +61,17 @@ describe("command line", () => {
     try {
       const result = await runCli("doctor", localAppData);
 
-      expect(result.exitCode).toBe(0);
+      expect(result.exitCode).toBe(2);
       const report = JSON.parse(result.stdout) as {
         status: string;
         exitCode: number;
         checks: unknown[];
       };
-      expect(report).toMatchObject({ status: "ready", exitCode: 0 });
+      expect(report).toMatchObject({ status: "degraded", exitCode: 2 });
       expect(report.checks).toContainEqual({
         name: "telegram",
-        status: "ready",
+        status: "degraded",
+        code: "unavailable",
       });
     } finally {
       await rm(localAppData, { recursive: true, force: true });

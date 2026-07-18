@@ -120,6 +120,8 @@ export function createMonitorService(options: {
   pageProbe: PageProbe;
   clock?: Clock;
   orchestrationTimeoutMs?: number;
+  beforeNotificationCommit?: () => Promise<void>;
+  afterNotificationCommits?: () => void;
 }): MonitorService {
   const clock = options.clock ?? { now: () => new Date() };
   let workerTail: Promise<void> = Promise.resolve();
@@ -128,6 +130,10 @@ export function createMonitorService(options: {
   let stopping = false;
   let discardCurrentResult = false;
   const orchestrationTimeoutMs = options.orchestrationTimeoutMs ?? 75_000;
+
+  async function prepareNotification(): Promise<void> {
+    await options.beforeNotificationCommit?.().catch(() => undefined);
+  }
 
   async function drainChecks(): Promise<void> {
     if (stopping) return;
@@ -160,6 +166,7 @@ export function createMonitorService(options: {
         completedAt.getTime() + claimed.intervalHours * 60 * 60 * 1_000,
       ).toISOString();
       if (!result.ok) {
+        if (claimed.kind === "retry") await prepareNotification();
         options.database.monitors.failCheck(
           claimed,
           { code: result.code, message: result.message },
@@ -195,6 +202,7 @@ export function createMonitorService(options: {
               nextCheckAt,
             );
           } else {
+            await prepareNotification();
             options.database.monitors.completeChange(
               claimed,
               snapshot,
@@ -211,6 +219,7 @@ export function createMonitorService(options: {
                 "snapshot_invalid",
                 "Не удалось сформировать Базовый снимок.",
               );
+        if (claimed.kind === "retry") await prepareNotification();
         options.database.monitors.failCheck(
           claimed,
           { code: failure.code, message: failure.message },
@@ -223,7 +232,9 @@ export function createMonitorService(options: {
   }
 
   function runAvailableChecks(): Promise<void> {
-    const run = workerTail.then(drainChecks);
+    const run = workerTail.then(drainChecks).then(() => {
+      options.afterNotificationCommits?.();
+    });
     workerTail = run.catch(() => undefined);
     return run;
   }

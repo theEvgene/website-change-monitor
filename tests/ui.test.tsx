@@ -34,6 +34,10 @@ describe("startup UI", () => {
         );
       }
 
+      if (input === "/api/telegram/recheck") {
+        return Promise.resolve(Response.json({ status: "available", reason: null }));
+      }
+
       return Promise.resolve(
         new Response(
           JSON.stringify({
@@ -54,6 +58,10 @@ describe("startup UI", () => {
     expect(await screen.findByText("Приложение работает с ограничениями")).toBeVisible();
     expect(screen.getByText("SQLite готова · схема 1")).toBeVisible();
     expect(screen.getByText("Telegram пока не настроен")).toBeVisible();
+    expect(screen.getByRole("alert")).toHaveTextContent("Telegram недоступен");
+    fireEvent.click(screen.getByRole("button", { name: "Проверить снова" }));
+    expect(await screen.findByText("Telegram доступен")).toBeVisible();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.getByText("Версия 0.1.0")).toBeVisible();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/health",

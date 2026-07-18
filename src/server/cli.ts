@@ -1,17 +1,35 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { release } from "node:os";
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 
 import { launchPlaywrightPageProbe } from "./browser-playwright/playwright-page-probe.js";
+import { inspectTelegramExecutable } from "./notifications/telegram-dispatcher.js";
 import { openInDefaultBrowser } from "./operations/browser.js";
 import { runDoctor } from "./operations/doctor.js";
 import { applicationRoot } from "./operations/paths.js";
 import { startApplication } from "./operations/start.js";
+import { openApplicationDatabase } from "./persistence/database.js";
 
 const port = 43117;
 
 async function main(): Promise<void> {
   const command = process.argv[2];
+  if (command === "configure") {
+    const marker = process.argv.indexOf("--telegram-executable");
+    const executable = marker < 0 ? undefined : process.argv[marker + 1];
+    if (executable === undefined || !isAbsolute(executable) || !existsSync(executable) || !statSync(executable).isFile()) {
+      process.stderr.write("Укажите существующий абсолютный путь: --telegram-executable <path>\n"); process.exitCode = 1; return;
+    }
+    const telegram = await inspectTelegramExecutable(executable);
+    if (telegram.status !== "available") {
+      process.stderr.write(`${telegram.reason ?? "Telegram sender недоступен."}\n`);
+      process.exitCode = 1;
+      return;
+    }
+    const database = openApplicationDatabase({ rootDirectory: applicationRoot(process.env) });
+    try { database.configureTelegramExecutable(executable); } finally { database.close(); }
+    process.stdout.write(`Telegram executable сохранён: ${executable}\n`); return;
+  }
   if (command === "doctor") {
     const report = await runDoctor({
       rootDirectory: applicationRoot(process.env),
@@ -72,7 +90,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  process.stderr.write("Использование: website-change-monitor <start|doctor>\n");
+  process.stderr.write("Использование: website-change-monitor <start|doctor|configure>\n");
   process.exitCode = 1;
 }
 

@@ -37,6 +37,25 @@ npm start
 
 Изменяемые данные хранятся в `%LOCALAPPDATA%\WebsiteChangeMonitor`, а не в Git checkout. Обычная остановка выполняется через `Ctrl+C`.
 
+Внутри этого корня приложение использует `data` для SQLite, `backups` для резервных копий, `logs` для редактированных NDJSON-логов и `browsers` для app-local Chromium. Путь к `telegram-alert.exe` хранится в SQLite; Telegram-токен остаётся только в Windows Credential Manager/keyring модуля `telegram-alert-bus`.
+
+## Диагностика и резервные копии
+
+Перед обслуживанием остановите приложение через `Ctrl+C`. Команды не перезаписывают существующие ручные копии и всегда печатают абсолютный путь:
+
+```powershell
+npm run build
+npm run backup
+node dist/server/cli.js backup --output "моя ручная копия.sqlite3"
+node dist/server/cli.js restore --input "$env:LOCALAPPDATA\WebsiteChangeMonitor\backups\моя ручная копия.sqlite3"
+```
+
+Backup создаётся SQLite backup API и проверяется через `quick_check` и `foreign_key_check`. Restore сначала проверяет целостность и совместимость копии, затем атомарно заменяет основную базу; при ошибке прежняя база остаётся на месте. Ручные копии автоматически не удаляются.
+
+`doctor` отдельно проверяет Windows/Node, доступность каталогов, SQLite и миграции, app-local Chromium, локальный порт и необязательный Telegram. Повреждённая SQLite блокирует старт до явного восстановления из проверенной копии.
+
+Лог `%LOCALAPPDATA%\WebsiteChangeMonitor\logs\application.ndjson` не сохраняет URL credentials, authorization/cookie/token/secret/stdin и известные Telegram-токены. Он ротируется при 10 MiB; сохраняются не более 20 поколений.
+
 ## Проверка разработки
 
 ```powershell

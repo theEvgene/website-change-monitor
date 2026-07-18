@@ -80,16 +80,15 @@ describe("command line", () => {
     }
   });
 
-  it("refuses to start under Node 20 before creating application data", async () => {
+  it.skipIf(process.env.TEST_NODE20_EXECUTABLE === undefined)("refuses to start under Node 20 before creating application data", async () => {
     const localAppData = await mkdtemp(
       join(tmpdir(), "website-change-monitor-localappdata-"),
     );
-
     try {
       const result = await runCli(
         "start",
         localAppData,
-        "C:\\Program Files\\nodejs\\node.exe",
+        process.env.TEST_NODE20_EXECUTABLE,
       );
 
       expect(result.exitCode).toBe(1);

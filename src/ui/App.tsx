@@ -38,6 +38,8 @@ export function App() {
   const [notificationSettingsBusy, setNotificationSettingsBusy] = useState(false);
   const [activeSection, setActiveSection] = useState<"monitors" | "journal" | "notifications">(sectionFromLocation);
   const [selectedCheckId, setSelectedCheckId] = useState<number | undefined>(() => checkFromLocation());
+  const [showMonitorDialog, setShowMonitorDialog] = useState(false);
+  const [showStatusDialog, setShowStatusDialog] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -110,90 +112,50 @@ export function App() {
     return () => window.clearInterval(timer);
   }, []);
 
+  const systemStatus = systemStatusPresentation(state);
+
   return (
     <div className="app-shell">
       <header className="topbar">
-        <div>
-          <p className="eyebrow">Локальное приложение</p>
+        <div className="topbar-primary">
           <h1>Website Change Monitor</h1>
+          <nav className="top-navigation" aria-label="Основная навигация">
+            <button type="button" aria-current={activeSection === "monitors" ? "page" : undefined} onClick={() => setActiveSection("monitors")}>Мониторы</button>
+            <button type="button" aria-current={activeSection === "journal" ? "page" : undefined} onClick={() => setActiveSection("journal")}>Журнал</button>
+            <button type="button" aria-current={activeSection === "notifications" ? "page" : undefined} onClick={() => setActiveSection("notifications")}>Уведомления</button>
+          </nav>
         </div>
         <div className="topbar-actions">
+          <button className={`system-status system-status--${systemStatus.tone}`} type="button" aria-label={systemStatus.ariaLabel} title={systemStatus.hint} onClick={() => setShowStatusDialog(true)}>
+            <span aria-hidden="true" />
+            {systemStatus.shortLabel}
+          </button>
+          <button className="add-monitor-button" type="button" onClick={() => setShowMonitorDialog(true)}>Добавить монитор</button>
           <label className="notification-switch">
             <span>Уведомлять при отсутствии изменений</span>
             <input role="switch" type="checkbox" checked={notifyWhenUnchanged} disabled={!notificationSettingsReady || notificationSettingsBusy} onChange={(event) => void changeNotificationSetting(event.target.checked)} />
           </label>
-          {state.kind === "loaded" ? <span className="version">Версия {state.version.version}</span> : null}
+          {state.kind === "loaded" ? <span className="version">v{state.version.version}</span> : null}
         </div>
       </header>
 
-      <nav className="top-navigation" aria-label="Основная навигация">
-        <button type="button" aria-current={activeSection === "monitors" ? "page" : undefined} onClick={() => setActiveSection("monitors")}>Мониторы</button>
-        <button type="button" aria-current={activeSection === "journal" ? "page" : undefined} onClick={() => setActiveSection("journal")}>Журнал</button>
-        <button type="button" aria-current={activeSection === "notifications" ? "page" : undefined} onClick={() => setActiveSection("notifications")}>Уведомления</button>
-      </nav>
-      {state.kind === "loaded" && state.health.telegram.status === "unavailable" ? (
-        <section className="telegram-banner" role="alert">
-          <strong>Telegram недоступен</strong>
-          <span>{state.health.telegram.reason ?? "Канал не настроен."}</span>
-          <button type="button" onClick={() => void recheckTelegram()}>Проверить снова</button>
-          <code>npm run doctor</code>
-        </section>
-      ) : null}
-
       <main>
-        {activeSection === "monitors" ? <>
-        <section className="status-panel" aria-live="polite">
-          <p className="eyebrow">Состояние системы</p>
-          {state.kind === "loading" ? <h2>Проверяем состояние…</h2> : null}
-          {state.kind === "failed" ? (
-            <>
-              <h2>Не удалось получить состояние приложения</h2>
-              <p className="muted">Обновите страницу или запустите диагностику.</p>
-            </>
-          ) : null}
-          {state.kind === "loaded" ? (
-            <>
-              <div className="headline-row">
-                <h2>
-                  {state.health.status === "degraded"
-                    ? "Приложение работает с ограничениями"
-                    : "Приложение готово"}
-                </h2>
-                <span className="status-badge status-badge--warning">
-                  Требуется внимание
-                </span>
-              </div>
-              <p className="muted">
-                Основные локальные компоненты запущены. Необязательные каналы можно
-                настроить позднее.
-              </p>
-              <div className="component-grid">
-                <article className="component-card">
-                  <span className="component-dot component-dot--ready" />
-                  <div>
-                    <h3>Хранилище</h3>
-                    <p>
-                      SQLite готова · схема {state.health.database.schemaVersion}
-                    </p>
-                  </div>
-                </article>
-                <article className="component-card">
-                  <span className={`component-dot ${state.health.telegram.status === "available" ? "component-dot--ready" : "component-dot--warning"}`} />
-                  <div>
-                    <h3>Канал уведомлений</h3>
-                    <p>{state.health.telegram.status === "available" ? "Telegram доступен" : "Telegram пока не настроен"}</p>
-                  </div>
-                </article>
-              </div>
-            </>
-          ) : null}
-        </section>
-        <PreviewPanel onMonitorCreated={() => setMonitorRefresh((value) => value + 1)} />
-        <MonitorsWorkspace refreshToken={monitorRefresh} />
-        </> : null}
+        {activeSection === "monitors" ? <MonitorsWorkspace refreshToken={monitorRefresh} /> : null}
         {activeSection === "journal" ? <JournalWorkspace selectedCheckId={selectedCheckId} /> : null}
         <NotificationsWorkspace centerVisible={activeSection === "notifications"} selectedCheckId={selectedCheckId} onOpenJournal={(checkId) => navigateTo("journal", checkId)} />
       </main>
+
+      {showMonitorDialog ? (
+        <div className="app-modal-backdrop">
+          <div className="app-modal-dialog app-modal-dialog--wide" role="dialog" aria-modal="true" aria-labelledby="preview-title">
+            <button className="modal-close" type="button" aria-label="Закрыть добавление монитора" onClick={() => setShowMonitorDialog(false)}>Закрыть</button>
+            <PreviewPanel onMonitorCreated={() => { setMonitorRefresh((value) => value + 1); setShowMonitorDialog(false); }} />
+          </div>
+        </div>
+      ) : null}
+      {showStatusDialog ? (
+        <SystemStatusDialog state={state} onClose={() => setShowStatusDialog(false)} onRecheckTelegram={() => void recheckTelegram()} />
+      ) : null}
     </div>
   );
 
@@ -221,6 +183,79 @@ export function App() {
       setNotifyWhenUnchanged(settings.notifyWhenUnchanged);
     } finally { setNotificationSettingsBusy(false); }
   }
+}
+
+function SystemStatusDialog({
+  state,
+  onClose,
+  onRecheckTelegram,
+}: {
+  state: HealthState;
+  onClose: () => void;
+  onRecheckTelegram: () => void;
+}) {
+  return (
+    <div className="app-modal-backdrop">
+      <section className="app-modal-dialog status-dialog" role="dialog" aria-modal="true" aria-labelledby="system-status-title">
+        <header className="modal-header">
+          <div>
+            <p className="eyebrow">Диагностика</p>
+            <h2 id="system-status-title">Состояние системы</h2>
+          </div>
+          <button className="modal-close" type="button" onClick={onClose}>Закрыть</button>
+        </header>
+        {state.kind === "loading" ? <p>Получаем состояние компонентов…</p> : null}
+        {state.kind === "failed" ? <p role="alert">Не удалось получить состояние приложения. Обновите страницу или запустите <code>npm run doctor</code>.</p> : null}
+        {state.kind === "loaded" ? (
+          <div className="component-grid">
+            <article className="component-card">
+              <span className="component-dot component-dot--ready" />
+              <div>
+                <h3>Хранилище</h3>
+                <p>SQLite готова · схема {state.health.database.schemaVersion}</p>
+              </div>
+            </article>
+            <article className="component-card">
+              <span className={`component-dot ${state.health.telegram.status === "available" ? "component-dot--ready" : "component-dot--warning"}`} />
+              <div>
+                <h3>Канал уведомлений</h3>
+                <p>{state.health.telegram.status === "available" ? "Telegram доступен" : "Telegram пока не настроен"}</p>
+                {state.health.telegram.status === "unavailable" ? (
+                  <>
+                    <small>{state.health.telegram.reason ?? "Канал не настроен."}</small>
+                    <button className="secondary-button" type="button" onClick={onRecheckTelegram}>Проверить снова</button>
+                  </>
+                ) : null}
+              </div>
+            </article>
+          </div>
+        ) : null}
+      </section>
+    </div>
+  );
+}
+
+function systemStatusPresentation(state: HealthState): {
+  tone: "ready" | "warning" | "danger" | "loading";
+  ariaLabel: string;
+  shortLabel: string;
+  hint: string;
+} {
+  if (state.kind === "loading") {
+    return { tone: "loading", ariaLabel: "Состояние системы загружается", shortLabel: "Проверяем", hint: "Получаем состояние локальных компонентов" };
+  }
+  if (state.kind === "failed") {
+    return { tone: "danger", ariaLabel: "Система недоступна", shortLabel: "Ошибка", hint: "Не удалось получить состояние приложения через локальный API" };
+  }
+  if (state.health.status === "ready") {
+    return { tone: "ready", ariaLabel: "Система работает", shortLabel: "Система готова", hint: "SQLite и Telegram доступны" };
+  }
+  return {
+    tone: "warning",
+    ariaLabel: "Система работает с ограничениями",
+    shortLabel: "Есть ограничения",
+    hint: `Telegram недоступен: ${state.health.telegram.reason ?? "канал не настроен"}`,
+  };
 }
 
 function sectionFromLocation(): "monitors" | "journal" | "notifications" {

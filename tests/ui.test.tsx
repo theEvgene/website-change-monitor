@@ -59,19 +59,20 @@ describe("startup UI", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("Приложение работает с ограничениями")).toBeVisible();
-    expect(screen.getByText("SQLite готова · схема 1")).toBeVisible();
-    expect(screen.getByText("Telegram пока не настроен")).toBeVisible();
-    expect(screen.getByRole("alert")).toHaveTextContent("Telegram недоступен");
+    const systemStatus = await screen.findByRole("button", { name: "Система работает с ограничениями" });
+    expect(systemStatus).toBeVisible();
+    expect(screen.queryByText("SQLite готова · схема 1")).not.toBeInTheDocument();
+    fireEvent.click(systemStatus);
+    expect(screen.getByRole("dialog", { name: "Состояние системы" })).toHaveTextContent("SQLite готова · схема 1");
+    expect(screen.getByRole("dialog", { name: "Состояние системы" })).toHaveTextContent("Telegram пока не настроен");
     fireEvent.click(screen.getByRole("button", { name: "Проверить снова" }));
     expect(await screen.findByText("Telegram доступен")).toBeVisible();
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     const controlSwitch = await screen.findByRole("switch", { name: "Уведомлять при отсутствии изменений" });
     expect(controlSwitch).not.toBeChecked();
     fireEvent.click(controlSwitch);
     await waitFor(() => expect(controlSwitch).toBeChecked());
     expect(fetchMock).toHaveBeenCalledWith("/api/settings/notifications", expect.objectContaining({ method: "PUT", body: JSON.stringify({ notifyWhenUnchanged: true }) }));
-    expect(screen.getByText("Версия 0.1.0")).toBeVisible();
+    expect(screen.getByText("v0.1.0")).toBeVisible();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/health",
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
@@ -124,6 +125,7 @@ describe("startup UI", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<App />);
 
+    fireEvent.click(await screen.findByRole("button", { name: "Добавить монитор" }));
     fireEvent.change(await screen.findByLabelText("URL страницы"), {
       target: { value: "https://example.com/start" },
     });
@@ -185,6 +187,7 @@ describe("startup UI", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<App />);
 
+    fireEvent.click(await screen.findByRole("button", { name: "Добавить монитор" }));
     expect(
       screen.queryByRole("button", {
         name: "Удалить: Целевой CSS-селектор 1",
@@ -372,6 +375,7 @@ describe("startup UI", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<App />);
 
+    fireEvent.click(await screen.findByRole("button", { name: "Добавить монитор" }));
     fireEvent.change(await screen.findByLabelText("URL страницы"), {
       target: { value: created.url },
     });

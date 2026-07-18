@@ -225,13 +225,13 @@ async function runPreview(
       throw pageError("navigation_failed", "Не удалось открыть страницу.");
     }
 
-    if (blockedError instanceof PageProbeAbort) {
-      throw blockedError;
-    }
     if (response === null) {
       throw pageError("navigation_failed", "Главный документ не был загружен.");
     }
     httpStatus = response.status();
+    if (response.status() >= 400 && blockedError instanceof PageProbeAbort) {
+      throw blockedError;
+    }
     if (response.status() >= 400) {
       throw pageError("http_error", "Страница вернула ошибку HTTP.");
     }
@@ -265,10 +265,6 @@ async function runPreview(
     const extracted = await timed("extractionMs", () =>
       extractObservationScope(page!, input, timings.extractionMs, limits),
     );
-    if (blockedError instanceof PageProbeAbort) {
-      throw blockedError;
-    }
-
     return {
       finalUrl: page.url(),
       httpStatus,

@@ -161,7 +161,7 @@ export function MonitorsWorkspace({ refreshToken }: { refreshToken: number }) {
                   {check.telegram == null ? null : <small>Telegram: {telegramDeliveryLabel(check.telegram.state)}{check.telegram.failureReason === null ? "" : ` — ${check.telegram.failureReason}`}</small>}
                   {hasComparableSnapshots(check) ? (
                     <button className="table-link" type="button" onClick={() => void openComparison(check.id)}>
-                      Открыть Сравнение
+                      Открыть сравнение
                     </button>
                   ) : null}
                 </li>

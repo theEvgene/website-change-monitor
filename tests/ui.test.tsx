@@ -550,7 +550,11 @@ describe("startup UI", () => {
           targets: [{
             kind: "replace",
             structure: [{ kind: "equal", before: "html:div", after: "html:div" }],
-            text: [{ kind: "replace", before: "Old product", after: "New product" }],
+            text: [
+              { kind: "replace", before: "Old product", after: "New product" },
+              { kind: "delete", before: "Removed product", after: null },
+              { kind: "insert", before: null, after: "Added product" },
+            ],
           }],
         }));
       }
@@ -561,15 +565,27 @@ describe("startup UI", () => {
     render(<App />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Журнал" }));
+    const journal = screen.getByRole("region", { name: "Журнал" });
+    expect(within(journal).queryByRole("heading", { name: "Журнал" })).not.toBeInTheDocument();
+    expect(within(journal).queryByText("Все проверки")).not.toBeInTheDocument();
     expect((await screen.findAllByRole("cell", { name: "Catalog" }))[0]).toBeVisible();
     expect(screen.getByRole("cell", { name: "Окончательная ошибка" })).toBeVisible();
-    const comparisonButtons = screen.getAllByRole("button", { name: "Открыть Сравнение" });
+    const comparisonButtons = screen.getAllByRole("button", { name: "Открыть сравнение" });
     expect(comparisonButtons).toHaveLength(2);
     fireEvent.click(comparisonButtons[0]!);
 
     const dialog = await screen.findByRole("dialog", { name: "Сравнение" });
     expect(within(dialog).getByText("Old product")).toHaveClass("diff-before");
     expect(within(dialog).getByText("New product")).toHaveClass("diff-after");
+    const deletedRow = within(dialog).getByText("Removed product").closest(".diff-row");
+    const insertedRow = within(dialog).getByText("Added product").closest(".diff-row");
+    expect(deletedRow?.querySelectorAll("pre")[0]).toHaveClass("diff-before");
+    expect(deletedRow?.querySelectorAll("pre")[1]).not.toHaveClass("diff-after");
+    expect(insertedRow?.querySelectorAll("pre")[0]).not.toHaveClass("diff-before");
+    expect(insertedRow?.querySelectorAll("pre")[1]).toHaveClass("diff-after");
+    expect(within(dialog).queryByText("html:div")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText(/Целевая область/u)).not.toBeInTheDocument();
+    expect(within(dialog).queryByText(/Проверка #/u)).not.toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "Закрыть" }));
     expect(screen.queryByRole("dialog", { name: "Сравнение" })).toBeNull();
     expect(screen.getAllByRole("cell", { name: "Catalog" })[0]).toBeVisible();

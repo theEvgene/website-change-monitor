@@ -74,10 +74,8 @@ export function NotificationsWorkspace({ centerVisible, selectedCheckId, onOpenJ
     if (centerVisible && selectedCheckId !== undefined) void openComparison(selectedCheckId);
   }, [centerVisible, selectedCheckId]);
 
-  return <><section className="journal-panel" aria-labelledby="notifications-title" hidden={!centerVisible}>
-    <p className="eyebrow">Центр событий</p>
-    <div className="headline-row">
-      <h2 id="notifications-title">Уведомления</h2>
+  return <><section className="journal-panel" aria-label="Уведомления" hidden={!centerVisible}>
+    <div className="notifications-toolbar">
       <div>{permissionLabel(permission)} {permission === "default" ? <button type="button" onClick={() => void requestPermission()}>Включить уведомления браузера</button> : null}</div>
     </div>
     {items.length === 0 ? <p className="muted">Уведомлений пока нет.</p> : <table className="dense-table">
@@ -87,8 +85,8 @@ export function NotificationsWorkspace({ centerVisible, selectedCheckId, onOpenJ
         <td>{event.monitorName}</td><td><strong>{event.title}</strong><br />{event.body}</td>
         <td>{telegramDeliveryLabel(event.telegram.state)}{event.telegram.failureReason === null ? null : <small>{event.telegram.failureReason}</small>}</td>
         <td>{event.kind === "change_detected"
-          ? <button className="table-link" type="button" onClick={() => void openComparison(event.checkId)}>Открыть Сравнение</button>
-          : <button className="table-link" type="button" onClick={() => onOpenJournal(event.checkId)}>Открыть Проверку</button>}</td>
+          ? <button className="table-link" type="button" onClick={() => void openComparison(event.checkId)}>Открыть сравнение</button>
+          : <button className="table-link" type="button" onClick={() => onOpenJournal(event.checkId)}>Открыть проверку</button>}</td>
       </tr>)}</tbody>
     </table>}
     {comparison === null ? null : <ComparisonModal comparison={comparison} onClose={() => setComparison(null)} />}

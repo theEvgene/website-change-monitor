@@ -413,10 +413,6 @@ main {
 
 .monitors-toolbar .status-badge { margin: 0; }
 
-.journal-panel > h2 {
-  margin: 6px 0 20px;
-}
-
 .comparison-backdrop {
   position: fixed;
   z-index: 20;
@@ -466,16 +462,7 @@ main {
   background: #fff;
 }
 
-.comparison-target {
-  margin-top: 12px;
-  padding: 14px;
-  border: 1px solid #dce2ea;
-  border-radius: 8px;
-}
-
-.comparison-target h3,
-.diff-section h4 { margin: 0 0 8px; }
-.diff-section + .diff-section { margin-top: 16px; }
+.comparison-text-diff { margin-top: 4px; }
 
 .diff-row pre {
   min-height: 32px;
@@ -578,7 +565,7 @@ main {
   padding-left: 20px;
 }
 
-.headline-row {
+.notifications-toolbar {
   display: flex;
   gap: 20px;
   align-items: center;
@@ -660,7 +647,7 @@ main {
   .topbar,
   .topbar-primary,
   .topbar-actions,
-  .headline-row {
+  .notifications-toolbar {
     align-items: flex-start;
     flex-direction: column;
   }

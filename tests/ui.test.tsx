@@ -63,16 +63,24 @@ describe("startup UI", () => {
     expect(systemStatus).toBeVisible();
     expect(screen.queryByText("SQLite готова · схема 1")).not.toBeInTheDocument();
     fireEvent.click(systemStatus);
-    expect(screen.getByRole("dialog", { name: "Состояние системы" })).toHaveTextContent("SQLite готова · схема 1");
-    expect(screen.getByRole("dialog", { name: "Состояние системы" })).toHaveTextContent("Telegram пока не настроен");
+    const statusDialog = screen.getByRole("dialog", { name: "Состояние системы" });
+    expect(statusDialog).toHaveTextContent("SQLite готова · схема 1");
+    expect(statusDialog).toHaveTextContent("Telegram пока не настроен");
+    expect(statusDialog).toHaveTextContent("v0.1.0");
+    expect(statusDialog).not.toHaveTextContent("Диагностика");
     fireEvent.click(screen.getByRole("button", { name: "Проверить снова" }));
     expect(await screen.findByText("Telegram доступен")).toBeVisible();
+    fireEvent.click(within(statusDialog).getByRole("button", { name: "Закрыть" }));
+    expect(screen.queryByRole("switch", { name: "Уведомлять при отсутствии изменений" })).not.toBeInTheDocument();
+    const settingsButton = screen.getByRole("button", { name: "Настройки" });
+    expect(settingsButton).toHaveAttribute("title", "Настройки");
+    fireEvent.click(settingsButton);
+    expect(screen.getByRole("dialog", { name: "Настройки" })).toBeVisible();
     const controlSwitch = await screen.findByRole("switch", { name: "Уведомлять при отсутствии изменений" });
     expect(controlSwitch).not.toBeChecked();
     fireEvent.click(controlSwitch);
     await waitFor(() => expect(controlSwitch).toBeChecked());
     expect(fetchMock).toHaveBeenCalledWith("/api/settings/notifications", expect.objectContaining({ method: "PUT", body: JSON.stringify({ notifyWhenUnchanged: true }) }));
-    expect(screen.getByText("v0.1.0")).toBeVisible();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/health",
       expect.objectContaining({ signal: expect.any(AbortSignal) }),

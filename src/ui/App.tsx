@@ -40,6 +40,7 @@ export function App() {
   const [selectedCheckId, setSelectedCheckId] = useState<number | undefined>(() => checkFromLocation());
   const [showMonitorDialog, setShowMonitorDialog] = useState(false);
   const [showStatusDialog, setShowStatusDialog] = useState(false);
+  const [showSettingsDialog, setShowSettingsDialog] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -131,11 +132,7 @@ export function App() {
             {systemStatus.shortLabel}
           </button>
           <button className="add-monitor-button" type="button" onClick={() => setShowMonitorDialog(true)}>Добавить монитор</button>
-          <label className="notification-switch">
-            <span>Уведомлять при отсутствии изменений</span>
-            <input role="switch" type="checkbox" checked={notifyWhenUnchanged} disabled={!notificationSettingsReady || notificationSettingsBusy} onChange={(event) => void changeNotificationSetting(event.target.checked)} />
-          </label>
-          {state.kind === "loaded" ? <span className="version">v{state.version.version}</span> : null}
+          <button className="settings-button" type="button" aria-label="Настройки" title="Настройки" onClick={() => setShowSettingsDialog(true)}><span aria-hidden="true">⚙</span></button>
         </div>
       </header>
 
@@ -155,6 +152,14 @@ export function App() {
       ) : null}
       {showStatusDialog ? (
         <SystemStatusDialog state={state} onClose={() => setShowStatusDialog(false)} onRecheckTelegram={() => void recheckTelegram()} />
+      ) : null}
+      {showSettingsDialog ? (
+        <SettingsDialog
+          notifyWhenUnchanged={notifyWhenUnchanged}
+          disabled={!notificationSettingsReady || notificationSettingsBusy}
+          onChange={(value) => void changeNotificationSetting(value)}
+          onClose={() => setShowSettingsDialog(false)}
+        />
       ) : null}
     </div>
   );
@@ -198,9 +203,9 @@ function SystemStatusDialog({
     <div className="app-modal-backdrop">
       <section className="app-modal-dialog status-dialog" role="dialog" aria-modal="true" aria-labelledby="system-status-title">
         <header className="modal-header">
-          <div>
-            <p className="eyebrow">Диагностика</p>
+          <div className="status-dialog-title">
             <h2 id="system-status-title">Состояние системы</h2>
+            {state.kind === "loaded" ? <span className="version">v{state.version.version}</span> : null}
           </div>
           <button className="modal-close" type="button" onClick={onClose}>Закрыть</button>
         </header>
@@ -230,6 +235,33 @@ function SystemStatusDialog({
             </article>
           </div>
         ) : null}
+      </section>
+    </div>
+  );
+}
+
+function SettingsDialog({
+  notifyWhenUnchanged,
+  disabled,
+  onChange,
+  onClose,
+}: {
+  notifyWhenUnchanged: boolean;
+  disabled: boolean;
+  onChange: (value: boolean) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="app-modal-backdrop">
+      <section className="app-modal-dialog settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+        <header className="modal-header">
+          <h2 id="settings-title">Настройки</h2>
+          <button className="modal-close" type="button" onClick={onClose}>Закрыть</button>
+        </header>
+        <label className="notification-switch settings-option">
+          <span>Уведомлять при отсутствии изменений</span>
+          <input role="switch" type="checkbox" checked={notifyWhenUnchanged} disabled={disabled} onChange={(event) => onChange(event.target.checked)} />
+        </label>
       </section>
     </div>
   );

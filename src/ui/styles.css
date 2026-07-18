@@ -130,7 +130,8 @@ main {
 }
 
 .system-status,
-.add-monitor-button {
+.add-monitor-button,
+.settings-button {
   min-height: 36px;
   padding: 7px 11px;
   color: #f8fafc;
@@ -148,6 +149,17 @@ main {
 .system-status--loading > span { background: #94a3b8; }
 .add-monitor-button { background: #2e73d2; border: 1px solid #6ca4ed; }
 .add-monitor-button:hover { background: #3d82df; }
+.settings-button {
+  display: grid;
+  width: 36px;
+  padding: 0;
+  place-items: center;
+  color: #d7e2f2;
+  font-size: 19px;
+  background: #24364f;
+  border: 1px solid #405573;
+}
+.settings-button:hover { color: #fff; background: #304663; }
 
 .app-modal-backdrop {
   position: fixed;
@@ -178,6 +190,9 @@ main {
 .modal-close { min-height: 36px; padding: 7px 11px; color: #344255; background: #fff; border: 1px solid #aebaca; border-radius: 6px; cursor: pointer; }
 .status-dialog .component-grid { margin-top: 20px; }
 .status-dialog small { display: block; margin: 6px 0 12px; color: #805000; }
+.status-dialog-title { display: flex; align-items: baseline; gap: 10px; }
+.settings-dialog { width: min(520px, 94vw); }
+.settings-option { justify-content: space-between; margin-top: 22px; padding: 14px 0; color: #1d2633; }
 
 .status-panel {
   padding: clamp(26px, 4vw, 44px);

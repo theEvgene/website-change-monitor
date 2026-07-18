@@ -12,7 +12,10 @@ export interface SafeProxy {
   close(): Promise<void>;
 }
 
-export function protectProxySocket(socket: Socket): void {
+export function destroyTrackedSocketOnError(socket: Socket): void {
+  // Every tracked socket needs an error listener: an unhandled Socket error
+  // terminates the Node.js process. Request-level failures are reported by the
+  // upstream request/tunnel handlers; this listener owns socket cleanup only.
   socket.on("error", () => {
     socket.destroy();
   });
@@ -26,7 +29,7 @@ export async function startSafeProxy(
   let closed = false;
   const trackSocket = (socket: Socket) => {
     sockets.add(socket);
-    protectProxySocket(socket);
+    destroyTrackedSocketOnError(socket);
     socket.once("close", () => sockets.delete(socket));
   };
   const server = createServer((incoming, outgoing) => {

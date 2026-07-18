@@ -56,6 +56,8 @@ Backup создаётся SQLite backup API и проверяется через
 
 Лог `%LOCALAPPDATA%\WebsiteChangeMonitor\logs\application.ndjson` не сохраняет URL credentials, authorization/cookie/token/secret/stdin и известные Telegram-токены. Он ротируется при 10 MiB; сохраняются не более 20 поколений.
 
+Обновление на точный Git tag, парный rollback и итоговый Windows smoke описаны в [`docs/windows-release.md`](./docs/windows-release.md).
+
 ## Проверка разработки
 
 ```powershell

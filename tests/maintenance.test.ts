@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { redact } from "../src/server/operations/logger.js";
 import { openApplicationDatabase } from "../src/server/persistence/database.js";
-import { createManualBackup, restoreManualBackup, verifyDatabaseFile } from "../src/server/persistence/maintenance.js";
+import { createAutomaticBackup, createManualBackup, restoreManualBackup, verifyDatabaseFile } from "../src/server/persistence/maintenance.js";
 
 describe("Windows data maintenance", () => {
   it("backs up and restores a database under a Unicode path without overwriting", async () => {
@@ -80,5 +80,24 @@ describe("Windows data maintenance", () => {
       message: "token [REDACTED]",
       stdin: "[REDACTED]",
     });
+  });
+
+  it("keeps three automatic generations per kind without deleting manual copies", async () => {
+    const root = await mkdtemp(join(tmpdir(), "wcm-retention-"));
+    try {
+      const database = openApplicationDatabase({ rootDirectory: root });
+      database.close();
+      await createManualBackup(root, "manual-keep.sqlite3");
+      const protectedBackup = await createAutomaticBackup(root, "pre-update");
+      for (let index = 0; index < 4; index += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 2));
+        await createAutomaticBackup(root, "pre-update", [protectedBackup]);
+      }
+      const { readdir } = await import("node:fs/promises");
+      const names = await readdir(join(root, "backups"));
+      expect(names.filter((name) => name.startsWith("pre-update-"))).toHaveLength(3);
+      expect(names).toContain(protectedBackup.split(/[\\/]/u).at(-1));
+      expect(names).toContain("manual-keep.sqlite3");
+    } finally { await rm(root, { recursive: true, force: true }); }
   });
 });

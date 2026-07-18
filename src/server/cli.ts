@@ -8,6 +8,7 @@ import { runDoctor } from "./operations/doctor.js";
 import { createNdjsonLogger } from "./operations/logger.js";
 import { applicationPaths, applicationRoot } from "./operations/paths.js";
 import { startApplication } from "./operations/start.js";
+import { createCommandRunner, rollbackRelease, updateRelease } from "./operations/release.js";
 import { openApplicationDatabase } from "./persistence/database.js";
 import { createManualBackup, restoreManualBackup } from "./persistence/maintenance.js";
 import { isWebsiteChangeMonitorAtPort } from "./operations/instance.js";
@@ -27,6 +28,36 @@ async function main(): Promise<void> {
   const rootDirectory = applicationRoot(process.env);
   const paths = applicationPaths(rootDirectory);
   process.env.PLAYWRIGHT_BROWSERS_PATH = paths.browsers;
+  if (["update", "rollback", "migrate"].includes(command ?? "")) {
+    if (await isWebsiteChangeMonitorAtPort(port)) {
+      process.stderr.write("Остановите Website Change Monitor перед обновлением, rollback или миграцией.\n");
+      process.exitCode = 1;
+      return;
+    }
+    if (command === "migrate") {
+      const database = openApplicationDatabase({ rootDirectory });
+      try { process.stdout.write(`Миграции применены: schema ${database.diagnostics().schemaVersion}.\n`); }
+      finally { database.close(); }
+      return;
+    }
+    const logger = createNdjsonLogger(paths.logs);
+    const options = { checkoutDirectory: process.cwd(), rootDirectory, logger, runner: createCommandRunner(process.cwd(), logger) };
+    try {
+      if (command === "update") {
+        const tag = process.argv[3];
+        if (tag === undefined) throw new Error("Укажите точный Git tag: update <tag>.");
+        const result = await updateRelease(options, tag);
+        process.stdout.write(`Обновление применено: ${result.targetCommit}. Backup: ${result.preUpdateBackup}\n`);
+      } else {
+        const result = await rollbackRelease(options);
+        process.stdout.write(`Rollback выполнен: ${result.previousCommit}. База восстановлена из ${result.preUpdateBackup}\n`);
+      }
+    } catch (error) {
+      process.stderr.write(`${safeErrorMessage(error)}\n`);
+      process.exitCode = 1;
+    }
+    return;
+  }
   if (command === "backup" || command === "restore") {
     if (await isWebsiteChangeMonitorAtPort(port)) {
       process.stderr.write("Остановите Website Change Monitor перед backup или restore.\n");
@@ -98,7 +129,9 @@ async function main(): Promise<void> {
       staticRoot: resolve(process.cwd(), "dist", "client"),
       port,
       version: applicationVersion(),
-      openBrowser: openInDefaultBrowser,
+      openBrowser: process.env.WEBSITE_CHANGE_MONITOR_SKIP_OPEN_BROWSER === "1"
+        ? async () => undefined
+        : openInDefaultBrowser,
       startPageProbe: async () => {
         const { launchPlaywrightPageProbe } = await import("./browser-playwright/playwright-page-probe.js");
         return launchPlaywrightPageProbe();
@@ -119,6 +152,7 @@ async function main(): Promise<void> {
         return;
       }
       closing = true;
+      process.stdin.pause();
       void outcome.close().then(
         () => {
           process.stdout.write("Website Change Monitor остановлен.\n");
@@ -132,10 +166,15 @@ async function main(): Promise<void> {
     };
     process.once("SIGINT", close);
     process.once("SIGTERM", close);
+    if (process.env.WEBSITE_CHANGE_MONITOR_SMOKE_CONTROL === "1") {
+      process.stdin.setEncoding("utf8");
+      process.stdin.once("data", close);
+      process.stdin.resume();
+    }
     return;
   }
 
-  process.stderr.write("Использование: website-change-monitor <start|doctor|configure|backup|restore>\n");
+  process.stderr.write("Использование: website-change-monitor <start|doctor|configure|backup|restore|update <tag>|rollback>\n");
   process.exitCode = 1;
 }
 

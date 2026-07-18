@@ -52,6 +52,7 @@ export interface NotificationEventRecord {
   kind: "change_detected" | "check_failed_final";
   monitorId: number;
   monitorName: string;
+  url: string;
   scopeRevision: number;
   checkId: number;
   chainCheckId: number;
@@ -60,6 +61,12 @@ export interface NotificationEventRecord {
   observedAt: string;
   targetPath: string;
   dedupeKey: string;
+  telegram: { state: "pending" | "sending" | "delivered" | "unavailable" | "permanent" | "temporary" | "timeout" | "abandoned"; failureReason: string | null };
+}
+
+export interface TelegramDeliveryJob {
+  deliveryId: number; eventId: number; kind: NotificationEventRecord["kind"];
+  monitorName: string; url: string; title: string; body: string; observedAt: string;
 }
 
 export interface NotificationFeed {
@@ -181,11 +188,18 @@ export interface MonitorStore {
   getComparison(checkId: number): ComparisonSnapshotPair | undefined;
   getMonitor(id: number): MonitorRecord | undefined;
   listNotifications(afterId?: number): NotificationFeed;
+  beginTelegramSession(bootId: string, available: boolean, now: string): void;
+  setTelegramAvailable(available: boolean, now: string): void;
+  claimTelegramDelivery(bootId: string, now: string): TelegramDeliveryJob | undefined;
+  finishTelegramDelivery(deliveryId: number, state: "delivered" | "permanent" | "temporary" | "timeout", failureReason: string | null, diagnostic: string | null, now: string): void;
+  abandonTelegramSession(bootId: string, now: string): void;
 }
 
 export function createMonitorStore(
   database: BetterSqlite3.Database,
 ): MonitorStore {
+  let telegramBootId = "not-started";
+  let telegramAvailable = false;
   const insertMonitor = database.prepare(`
     INSERT INTO monitors (name, url, interval_hours, created_at, updated_at)
     VALUES (@name, @url, @intervalHours, @now, @now)
@@ -468,17 +482,21 @@ export function createMonitorStore(
   const insertNotification = database.prepare(`
     INSERT INTO notification_events (
       kind, monitor_id, monitor_name, scope_revision, check_id, chain_check_id,
-      title, body, observed_at, target_path, dedupe_key
+      title, body, observed_at, target_path, dedupe_key, url
     ) VALUES (@kind, @monitorId, @monitorName, @scopeRevision, @checkId, @chainCheckId,
-      @title, @body, @observedAt, @targetPath, @dedupeKey)
+      @title, @body, @observedAt, @targetPath, @dedupeKey, @url)
+  `);
+  const insertTelegramDelivery = database.prepare(`
+    INSERT INTO notification_deliveries (event_id, channel, boot_id, state, failure_reason, created_at, updated_at)
+    VALUES (?, 'telegram', ?, ?, ?, ?, ?)
   `);
 
   function recordNotification(
-    claimed: Pick<ClaimedCheck, "monitorId" | "monitorName" | "scopeRevision" | "checkId" | "chainCheckId">,
+    claimed: Pick<ClaimedCheck, "monitorId" | "monitorName" | "url" | "scopeRevision" | "checkId" | "chainCheckId">,
     completedAt: string,
     event: Pick<NotificationEventRecord, "kind" | "title" | "body" | "targetPath" | "dedupeKey">,
   ): void {
-    insertNotification.run({
+    const inserted = insertNotification.run({
       ...event,
       monitorId: claimed.monitorId,
       monitorName: claimed.monitorName,
@@ -486,7 +504,13 @@ export function createMonitorStore(
       checkId: claimed.checkId,
       chainCheckId: claimed.chainCheckId,
       observedAt: completedAt,
+      url: claimed.url,
     });
+    insertTelegramDelivery.run(
+      Number(inserted.lastInsertRowid), telegramBootId,
+      telegramAvailable ? "pending" : "unavailable",
+      telegramAvailable ? null : "Канал Telegram недоступен.", completedAt, completedAt,
+    );
   }
 
   function recordChangeNotification(claimed: ClaimedCheck, completedAt: string): void {
@@ -499,7 +523,7 @@ export function createMonitorStore(
   }
 
   function recordFinalErrorNotification(
-    claimed: Pick<ClaimedCheck, "monitorId" | "monitorName" | "scopeRevision" | "checkId" | "chainCheckId">,
+    claimed: Pick<ClaimedCheck, "monitorId" | "monitorName" | "url" | "scopeRevision" | "checkId" | "chainCheckId">,
     completedAt: string,
     errorMessage: string,
   ): void {
@@ -641,7 +665,7 @@ export function createMonitorStore(
 
   function recordFailureTransition(
     identity: Pick<ClaimedCheck,
-      "checkId" | "intentId" | "kind" | "monitorId" | "monitorName" | "scopeRevision" | "chainCheckId">,
+      "checkId" | "intentId" | "kind" | "monitorId" | "monitorName" | "url" | "scopeRevision" | "chainCheckId">,
     error: { code: string; message: string },
     completedAt: string,
     nextCheckAt: string,
@@ -732,7 +756,7 @@ export function createMonitorStore(
   const recoverInterruptedTransaction = database.transaction((now: string) => {
     const rows = database.prepare(`
       SELECT i.id intent_id, i.kind, i.monitor_id, i.scope_revision,
-             c.id check_id, m.name monitor_name, m.interval_hours, i.retry_of_check_id
+             c.id check_id, m.name monitor_name, m.url, m.interval_hours, i.retry_of_check_id
       FROM check_intents i
       JOIN checks c ON c.intent_id = i.id AND c.status = 'running'
       JOIN monitors m ON m.id = i.monitor_id
@@ -741,7 +765,7 @@ export function createMonitorStore(
     `).all() as Array<{
       intent_id: number; kind: CheckIntentKind; monitor_id: number;
       scope_revision: number; check_id: number;
-      monitor_name: string; retry_of_check_id: number | null;
+      monitor_name: string; url: string; retry_of_check_id: number | null;
       interval_hours: 6 | 12 | 24 | 48 | 72;
     }>;
     for (const row of rows) {
@@ -755,6 +779,7 @@ export function createMonitorStore(
           kind: row.kind,
           monitorId: row.monitor_id,
           monitorName: row.monitor_name,
+          url: row.url,
           chainCheckId: row.retry_of_check_id ?? row.check_id,
           scopeRevision: row.scope_revision,
         },
@@ -1058,22 +1083,59 @@ export function createMonitorStore(
     listNotifications(afterId = 0) {
       const high = database.prepare(`SELECT COALESCE(MAX(id), 0) high FROM notification_events`).get() as { high: number };
       const rows = database.prepare(`
-        SELECT id, kind, monitor_id, monitor_name, scope_revision, check_id,
-          chain_check_id, title, body, observed_at, target_path, dedupe_key
-        FROM notification_events WHERE id > ? ORDER BY id
+        SELECT e.id, e.kind, e.monitor_id, e.monitor_name, e.url, e.scope_revision, e.check_id,
+          e.chain_check_id, e.title, e.body, e.observed_at, e.target_path, e.dedupe_key,
+          d.state telegram_state, d.failure_reason
+        FROM notification_events e JOIN notification_deliveries d ON d.event_id = e.id AND d.channel = 'telegram'
+        WHERE e.id > ? ORDER BY e.id
       `).all(afterId) as Array<{
         id: number; kind: NotificationEventRecord["kind"]; monitor_id: number;
-        monitor_name: string; scope_revision: number; check_id: number;
+        monitor_name: string; url: string; scope_revision: number; check_id: number;
         chain_check_id: number; title: string; body: string; observed_at: string;
-        target_path: string; dedupe_key: string;
+        target_path: string; dedupe_key: string; telegram_state: NotificationEventRecord["telegram"]["state"]; failure_reason: string | null;
       }>;
       return { highWaterMark: high.high, items: rows.map((row) => ({
         id: row.id, kind: row.kind, monitorId: row.monitor_id,
-        monitorName: row.monitor_name, scopeRevision: row.scope_revision,
+        monitorName: row.monitor_name, url: row.url, scopeRevision: row.scope_revision,
         checkId: row.check_id, chainCheckId: row.chain_check_id,
         title: row.title, body: row.body, observedAt: row.observed_at,
         targetPath: row.target_path, dedupeKey: row.dedupe_key,
+        telegram: { state: row.telegram_state, failureReason: row.failure_reason },
       })) };
+    },
+    beginTelegramSession(bootId, available, now) {
+      database.transaction(() => {
+        database.prepare(`UPDATE notification_deliveries SET state = 'abandoned', failure_reason = 'Приложение было перезапущено.', updated_at = ? WHERE state IN ('pending','sending')`).run(now);
+        telegramBootId = bootId; telegramAvailable = available;
+      })();
+    },
+    setTelegramAvailable(available, now) {
+      telegramAvailable = available;
+      if (!available) {
+        database.prepare(`
+          UPDATE notification_deliveries
+          SET state = 'unavailable', failure_reason = 'Канал Telegram недоступен.', updated_at = ?
+          WHERE boot_id = ? AND state = 'pending'
+        `).run(now, telegramBootId);
+      }
+    },
+    claimTelegramDelivery(bootId, now) {
+      return database.transaction(() => {
+        const row = database.prepare(`
+          SELECT d.id delivery_id, e.id event_id, e.kind, e.monitor_name, e.url, e.title, e.body, e.observed_at
+          FROM notification_deliveries d JOIN notification_events e ON e.id = d.event_id
+          WHERE d.boot_id = ? AND d.state = 'pending' ORDER BY d.id LIMIT 1
+        `).get(bootId) as { delivery_id: number; event_id: number; kind: NotificationEventRecord["kind"]; monitor_name: string; url: string; title: string; body: string; observed_at: string } | undefined;
+        if (row === undefined) return undefined;
+        if (database.prepare(`UPDATE notification_deliveries SET state = 'sending', updated_at = ? WHERE id = ? AND state = 'pending'`).run(now, row.delivery_id).changes !== 1) return undefined;
+        return { deliveryId: row.delivery_id, eventId: row.event_id, kind: row.kind, monitorName: row.monitor_name, url: row.url, title: row.title, body: row.body, observedAt: row.observed_at };
+      })();
+    },
+    finishTelegramDelivery(deliveryId, state, failureReason, diagnostic, now) {
+      assertChanged(database.prepare(`UPDATE notification_deliveries SET state = ?, failure_reason = ?, diagnostic = ?, updated_at = ? WHERE id = ? AND state = 'sending'`).run(state, failureReason, diagnostic, now, deliveryId).changes);
+    },
+    abandonTelegramSession(bootId, now) {
+      database.prepare(`UPDATE notification_deliveries SET state = 'abandoned', failure_reason = 'Приложение остановлено до отправки.', updated_at = ? WHERE boot_id = ? AND state IN ('pending','sending')`).run(now, bootId);
     },
   };
 }

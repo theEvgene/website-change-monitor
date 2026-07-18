@@ -15,6 +15,7 @@ interface NotificationEvent {
   observedAt: string;
   targetPath: string;
   dedupeKey: string;
+  telegram: { state: "pending" | "sending" | "delivered" | "unavailable" | "permanent" | "temporary" | "timeout" | "abandoned"; failureReason: string | null };
 }
 
 interface NotificationFeed { highWaterMark: number; items: NotificationEvent[] }
@@ -50,6 +51,10 @@ export function NotificationsWorkspace({ centerVisible, selectedCheckId, onOpenJ
           const event = JSON.parse((message as MessageEvent<string>).data) as NotificationEvent;
           append(event, true);
         });
+        source.addEventListener("delivery", (message) => {
+          const event = JSON.parse((message as MessageEvent<string>).data) as NotificationEvent;
+          setItems((current) => current.map((item) => item.id === event.id ? event : item));
+        });
       })
       .catch((error: unknown) => {
         if (!(error instanceof DOMException && error.name === "AbortError")) setItems([]);
@@ -74,10 +79,11 @@ export function NotificationsWorkspace({ centerVisible, selectedCheckId, onOpenJ
       <div>{permissionLabel(permission)} {permission === "default" ? <button type="button" onClick={() => void requestPermission()}>Включить уведомления браузера</button> : null}</div>
     </div>
     {items.length === 0 ? <p className="muted">Уведомлений пока нет.</p> : <table className="dense-table">
-      <thead><tr><th>Время</th><th>Монитор</th><th>Событие</th><th>Действие</th></tr></thead>
+      <thead><tr><th>Время</th><th>Монитор</th><th>Событие</th><th>Telegram</th><th>Действие</th></tr></thead>
       <tbody>{[...items].reverse().map((event) => <tr key={event.id}>
         <td>{new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" }).format(new Date(event.observedAt))}</td>
         <td>{event.monitorName}</td><td><strong>{event.title}</strong><br />{event.body}</td>
+        <td>{telegramLabel(event.telegram.state)}{event.telegram.failureReason === null ? null : <small>{event.telegram.failureReason}</small>}</td>
         <td>{event.kind === "change_detected"
           ? <button className="table-link" type="button" onClick={() => void openComparison(event.checkId)}>Открыть Сравнение</button>
           : <button className="table-link" type="button" onClick={() => onOpenJournal(event.checkId)}>Открыть Проверку</button>}</td>
@@ -126,4 +132,10 @@ function permissionLabel(permission: NotificationPermission | "unsupported"): st
   if (permission === "denied") return "Уведомления браузера запрещены в настройках.";
   if (permission === "unsupported") return "Уведомления браузера не поддерживаются.";
   return "Разрешение браузера ещё не запрошено.";
+}
+
+function telegramLabel(state: NotificationEvent["telegram"]["state"]): string {
+  if (state === "pending" || state === "sending") return "Отправляется";
+  if (state === "delivered") return "Отправлено";
+  return "Не отправлено";
 }

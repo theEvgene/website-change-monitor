@@ -48,11 +48,11 @@ describe("local HTTP server", () => {
       version: "0.1.0",
       database: {
         status: "ready",
-        schemaVersion: 7,
+        schemaVersion: 8,
       },
       telegram: {
         status: "unavailable",
-        reason: "not_configured",
+        reason: "Исполняемый файл Telegram не настроен или недоступен.",
       },
     });
   });

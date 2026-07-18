@@ -10,6 +10,7 @@ import { automaticSchedulingMigration } from "./migrations/004-automatic-schedul
 import { retriesAndPauseMigration } from "./migrations/005-retries-and-pause.js";
 import { monitorManagementMigration } from "./migrations/006-monitor-management.js";
 import { notificationsMigration } from "./migrations/007-notifications.js";
+import { telegramDeliveryMigration } from "./migrations/008-telegram-delivery.js";
 import { createMonitorStore, type MonitorStore } from "./monitor-store.js";
 
 export interface DatabaseDiagnostics {
@@ -24,6 +25,8 @@ export interface DatabaseDiagnostics {
 export interface ApplicationDatabase {
   readonly path: string;
   readonly monitors: MonitorStore;
+  telegramExecutablePath(): string | null;
+  configureTelegramExecutable(path: string): void;
   diagnostics(): DatabaseDiagnostics;
   close(): void;
 }
@@ -46,6 +49,7 @@ const migrations = [
   retriesAndPauseMigration,
   monitorManagementMigration,
   notificationsMigration,
+  telegramDeliveryMigration,
 ];
 
 export function openApplicationDatabase(
@@ -95,6 +99,13 @@ export function openApplicationDatabase(
   return {
     path: databasePath,
     monitors: createMonitorStore(database),
+    telegramExecutablePath() {
+      const row = database.prepare("SELECT value FROM application_metadata WHERE key = 'telegram_executable_path'").get() as { value: string } | undefined;
+      return row?.value ?? null;
+    },
+    configureTelegramExecutable(path) {
+      database.prepare("INSERT INTO application_metadata (key, value) VALUES ('telegram_executable_path', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(path);
+    },
     diagnostics() {
       const schemaVersion = database
         .prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations")

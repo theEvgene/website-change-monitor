@@ -124,6 +124,7 @@ describe("doctor", () => {
           architecture: "x64",
           windowsRelease: "10.0.26200",
         },
+        inspectTelegram: async () => true,
       });
 
       expect(report.status).toBe("ready");

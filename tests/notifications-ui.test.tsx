@@ -20,10 +20,12 @@ class FakeEventSource {
 
 const first = {
   id: 1, kind: "change_detected", monitorId: 7, monitorName: "Каталог",
+  url: "https://example.com/catalog",
   scopeRevision: 1, checkId: 10, chainCheckId: 10,
   title: "Обнаружено изменение", body: "Монитор «Каталог»: страница изменилась.",
   observedAt: "2026-07-17T10:00:00.000Z", targetPath: "/?section=notifications&check=10",
   dedupeKey: "change:10",
+  telegram: { state: "delivered", failureReason: null },
 } as const;
 
 describe("Notifications UI", () => {
@@ -49,6 +51,9 @@ describe("Notifications UI", () => {
     FakeEventSource.latest.emit(second); FakeEventSource.latest.emit(second);
     expect(await screen.findByRole("status")).toHaveTextContent("Новое событие");
     expect(screen.getAllByRole("row")).toHaveLength(4);
+    FakeEventSource.latest.emit({ ...second, telegram: { state: "temporary", failureReason: "Telegram недоступен." } }, "delivery");
+    expect(await screen.findByText("Telegram недоступен.")).toBeVisible();
+    expect(screen.getAllByText("Не отправлено")).toHaveLength(1);
   });
 
   it("uses one tagged system notification for a background event", async () => {

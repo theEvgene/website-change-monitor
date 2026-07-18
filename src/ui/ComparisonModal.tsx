@@ -44,7 +44,7 @@ export function ComparisonModal({
   onClose: () => void;
 }) {
   return (
-    <div className="comparison-backdrop" role="presentation">
+    <div className="comparison-backdrop" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <section className="comparison-dialog" role="dialog" aria-modal="true" aria-label="Сравнение">
         <header className="comparison-header">
           <div>

@@ -91,6 +91,55 @@ describe("startup UI", () => {
     );
   });
 
+  it("closes dialogs from the backdrop and protects an edited monitor form", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: RequestInfo | URL) => Promise.resolve(
+      input === "/api/settings/notifications"
+        ? Response.json({ notifyWhenUnchanged: false })
+        : input === "/api/version"
+          ? Response.json({ application: "website-change-monitor", apiVersion: "v1", version: "0.1.0" })
+          : Response.json({
+              application: "website-change-monitor",
+              status: "ready",
+              version: "0.1.0",
+              database: { status: "ready", schemaVersion: 1 },
+              telegram: { status: "available", reason: null },
+            }),
+    )));
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const { container } = render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Добавить монитор" }));
+    const monitorDialog = screen.getByRole("dialog", { name: "Проверить Область наблюдения" });
+    fireEvent.click(within(monitorDialog).getByRole("button", { name: "Закрыть добавление монитора" }));
+    expect(screen.queryByRole("dialog", { name: "Проверить Область наблюдения" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Добавить монитор" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "URL страницы" }), { target: { value: "https://example.com" } });
+    const backdrop = container.querySelector(".app-modal-backdrop");
+    expect(backdrop).not.toBeNull();
+    fireEvent.click(backdrop!);
+    expect(confirm).toHaveBeenCalledWith("Внесённые изменения не сохранены и будут потеряны. Закрыть окно?");
+    expect(screen.getByRole("dialog", { name: "Проверить Область наблюдения" })).toBeVisible();
+
+    confirm.mockReturnValue(true);
+    fireEvent.click(backdrop!);
+    expect(screen.queryByRole("dialog", { name: "Проверить Область наблюдения" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Система работает" }));
+    const statusDialog = screen.getByRole("dialog", { name: "Состояние системы" });
+    fireEvent.click(statusDialog);
+    expect(statusDialog).toBeVisible();
+    fireEvent.click(statusDialog.parentElement!);
+    expect(screen.queryByRole("dialog", { name: "Состояние системы" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Настройки" }));
+    const settingsDialog = screen.getByRole("dialog", { name: "Настройки" });
+    fireEvent.click(settingsDialog);
+    expect(settingsDialog).toBeVisible();
+    fireEvent.click(settingsDialog.parentElement!);
+    expect(screen.queryByRole("dialog", { name: "Настройки" })).not.toBeInTheDocument();
+  });
+
   it("previews repeatable target and exclusion selectors through the public API", async () => {
     const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
       if (input === "/api/version") {

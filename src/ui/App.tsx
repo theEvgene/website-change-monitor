@@ -39,6 +39,7 @@ export function App() {
   const [activeSection, setActiveSection] = useState<"monitors" | "journal" | "notifications">(sectionFromLocation);
   const [selectedCheckId, setSelectedCheckId] = useState<number | undefined>(() => checkFromLocation());
   const [showMonitorDialog, setShowMonitorDialog] = useState(false);
+  const [monitorDialogDirty, setMonitorDialogDirty] = useState(false);
   const [showStatusDialog, setShowStatusDialog] = useState(false);
   const [showSettingsDialog, setShowSettingsDialog] = useState(false);
 
@@ -131,7 +132,7 @@ export function App() {
             <span aria-hidden="true" />
             {systemStatus.shortLabel}
           </button>
-          <button className="add-monitor-button" type="button" onClick={() => setShowMonitorDialog(true)}>Добавить монитор</button>
+          <button className="add-monitor-button" type="button" onClick={() => { setMonitorDialogDirty(false); setShowMonitorDialog(true); }}>Добавить монитор</button>
           <button className="settings-button" type="button" aria-label="Настройки" title="Настройки" onClick={() => setShowSettingsDialog(true)}><span aria-hidden="true">⚙</span></button>
         </div>
       </header>
@@ -143,10 +144,10 @@ export function App() {
       </main>
 
       {showMonitorDialog ? (
-        <div className="app-modal-backdrop">
+        <div className="app-modal-backdrop" onClick={(event) => { if (event.target === event.currentTarget) requestMonitorDialogClose(); }}>
           <div className="app-modal-dialog app-modal-dialog--wide" role="dialog" aria-modal="true" aria-labelledby="preview-title">
-            <button className="modal-close" type="button" aria-label="Закрыть добавление монитора" onClick={() => setShowMonitorDialog(false)}>Закрыть</button>
-            <PreviewPanel onMonitorCreated={() => { setMonitorRefresh((value) => value + 1); setShowMonitorDialog(false); }} />
+            <button className="modal-close" type="button" aria-label="Закрыть добавление монитора" onClick={requestMonitorDialogClose}>Закрыть</button>
+            <PreviewPanel onDirtyChange={setMonitorDialogDirty} onMonitorCreated={() => { setMonitorRefresh((value) => value + 1); setShowMonitorDialog(false); }} />
           </div>
         </div>
       ) : null}
@@ -188,6 +189,12 @@ export function App() {
       setNotifyWhenUnchanged(settings.notifyWhenUnchanged);
     } finally { setNotificationSettingsBusy(false); }
   }
+
+  function requestMonitorDialogClose() {
+    if (monitorDialogDirty && !window.confirm("Внесённые изменения не сохранены и будут потеряны. Закрыть окно?")) return;
+    setShowMonitorDialog(false);
+    setMonitorDialogDirty(false);
+  }
 }
 
 function SystemStatusDialog({
@@ -200,7 +207,7 @@ function SystemStatusDialog({
   onRecheckTelegram: () => void;
 }) {
   return (
-    <div className="app-modal-backdrop">
+    <div className="app-modal-backdrop" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <section className="app-modal-dialog status-dialog" role="dialog" aria-modal="true" aria-labelledby="system-status-title">
         <header className="modal-header">
           <div className="status-dialog-title">
@@ -252,7 +259,7 @@ function SettingsDialog({
   onClose: () => void;
 }) {
   return (
-    <div className="app-modal-backdrop">
+    <div className="app-modal-backdrop" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <section className="app-modal-dialog settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
         <header className="modal-header">
           <h2 id="settings-title">Настройки</h2>

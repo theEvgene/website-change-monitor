@@ -50,6 +50,16 @@ describe("Telegram dispatcher", () => {
     } finally { inspection.close(); }
   });
 
+  it("maps a control notification to the Telegram success status", async () => {
+    const fixture = await setup({});
+    const dispatcher = createTelegramDispatcher({ store: fixture.database.monitors, executablePath: process.execPath, argsPrefix: [fixture.script], environment: fixture.environment });
+    await dispatcher.initialize(); seedControl(fixture.database); await dispatcher.drain();
+    const captured = JSON.parse(await readFile(fixture.capture, "utf8")) as { payload: { status: string } };
+    expect(captured.payload.status).toBe("success");
+    expect(fixture.database.monitors.listNotifications().items).toEqual([]);
+    expect(fixture.database.monitors.listLiveNotifications().items[0]).toMatchObject({ kind: "control_check_ok", centerVisible: false, telegram: { state: "delivered" } });
+  });
+
   it("times out one sender and never retries it", async () => {
     const fixture = await setup({ FAKE_DELAY: "100" });
     const dispatcher = createTelegramDispatcher({ store: fixture.database.monitors, executablePath: process.execPath, argsPrefix: [fixture.script], environment: fixture.environment, deadlineMs: 10 });
@@ -118,4 +128,14 @@ function seedChange(database: ApplicationDatabase, name: string, url = "https://
   database.monitors.enqueueManualCheck(id, now);
   const changed = database.monitors.claimNextCheck(now)!;
   database.monitors.completeChange(changed, { formatVersion: 1, sha256: "b".repeat(64), canonicalJson: '{"a":2}' }, now, "2026-07-18T14:00:00.000Z");
+}
+
+function seedControl(database: ApplicationDatabase): void {
+  const now = "2026-07-18T08:00:00.000Z";
+  database.monitors.updateNotificationSettings(true);
+  const id = database.monitors.createMonitor({ name: "Catalog", url: "https://example.com", targetSelectors: ["body"], exclusionSelectors: [], intervalHours: 6 }, now);
+  const baseline = database.monitors.claimNextCheck(now)!;
+  database.monitors.completeBaseline(baseline, { formatVersion: 1, sha256: "a".repeat(64), canonicalJson: '{"a":1}' }, now, "2026-07-18T14:00:00.000Z");
+  database.monitors.enqueueManualCheck(id, now);
+  database.monitors.completeNoChange(database.monitors.claimNextCheck(now)!, now, "2026-07-18T14:00:00.000Z");
 }

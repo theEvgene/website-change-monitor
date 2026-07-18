@@ -33,6 +33,9 @@ type HealthState =
 export function App() {
   const [state, setState] = useState<HealthState>({ kind: "loading" });
   const [monitorRefresh, setMonitorRefresh] = useState(0);
+  const [notifyWhenUnchanged, setNotifyWhenUnchanged] = useState(false);
+  const [notificationSettingsReady, setNotificationSettingsReady] = useState(false);
+  const [notificationSettingsBusy, setNotificationSettingsBusy] = useState(false);
   const [activeSection, setActiveSection] = useState<"monitors" | "journal" | "notifications">(sectionFromLocation);
   const [selectedCheckId, setSelectedCheckId] = useState<number | undefined>(() => checkFromLocation());
 
@@ -72,6 +75,20 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    const controller = new AbortController();
+    void fetch("/api/settings/notifications", { headers: { accept: "application/json" }, signal: controller.signal })
+      .then(async (response) => response.ok ? await response.json() as { notifyWhenUnchanged?: unknown } : undefined)
+      .then((settings) => {
+        if (typeof settings?.notifyWhenUnchanged === "boolean") setNotifyWhenUnchanged(settings.notifyWhenUnchanged);
+        setNotificationSettingsReady(true);
+      })
+      .catch((error: unknown) => {
+        if (!(error instanceof DOMException && error.name === "AbortError")) setNotificationSettingsReady(true);
+      });
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
     const navigate = () => { setActiveSection(sectionFromLocation()); setSelectedCheckId(checkFromLocation()); };
     window.addEventListener("popstate", navigate);
     return () => window.removeEventListener("popstate", navigate);
@@ -100,9 +117,13 @@ export function App() {
           <p className="eyebrow">Локальное приложение</p>
           <h1>Website Change Monitor</h1>
         </div>
-        {state.kind === "loaded" ? (
-          <span className="version">Версия {state.version.version}</span>
-        ) : null}
+        <div className="topbar-actions">
+          <label className="notification-switch">
+            <span>Уведомлять при отсутствии изменений</span>
+            <input role="switch" type="checkbox" checked={notifyWhenUnchanged} disabled={!notificationSettingsReady || notificationSettingsBusy} onChange={(event) => void changeNotificationSetting(event.target.checked)} />
+          </label>
+          {state.kind === "loaded" ? <span className="version">Версия {state.version.version}</span> : null}
+        </div>
       </header>
 
       <nav className="top-navigation" aria-label="Основная навигация">
@@ -186,6 +207,19 @@ export function App() {
     if (!response.ok || state.kind !== "loaded") return;
     const telegram = await response.json() as HealthResponse["telegram"];
     setState({ ...state, health: { ...state.health, status: telegram.status === "available" ? "ready" : "degraded", telegram } });
+  }
+
+  async function changeNotificationSetting(value: boolean) {
+    setNotificationSettingsBusy(true);
+    try {
+      const response = await fetch("/api/settings/notifications", {
+        method: "PUT", headers: { accept: "application/json", "content-type": "application/json" },
+        body: JSON.stringify({ notifyWhenUnchanged: value }),
+      });
+      if (!response.ok) return;
+      const settings = await response.json() as { notifyWhenUnchanged: boolean };
+      setNotifyWhenUnchanged(settings.notifyWhenUnchanged);
+    } finally { setNotificationSettingsBusy(false); }
   }
 }
 

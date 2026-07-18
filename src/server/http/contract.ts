@@ -257,6 +257,16 @@ const snapshotMetadataProperties = {
   sha256: { type: "string", pattern: "^[a-f0-9]{64}$" },
 } as const;
 
+const telegramDeliveryObjectSchema = {
+  type: "object", additionalProperties: false, required: ["state", "failureReason"], properties: {
+    state: { enum: ["pending", "sending", "delivered", "unavailable", "permanent", "temporary", "timeout", "abandoned"], type: "string" },
+    failureReason: { type: ["string", "null"] },
+  },
+} as const;
+const telegramDeliverySchema = {
+  anyOf: [telegramDeliveryObjectSchema, { type: "null" }],
+} as const;
+
 const checkProperties = {
   id: { type: "integer", minimum: 1 },
   kind: {
@@ -275,6 +285,7 @@ const checkProperties = {
   beforeSnapshotId: { type: ["integer", "null"], minimum: 1 },
   afterSnapshotId: { type: ["integer", "null"], minimum: 1 },
   isFinalError: { type: "boolean" },
+  telegram: telegramDeliverySchema,
   snapshot: {
     anyOf: [
       {
@@ -305,6 +316,7 @@ export const monitorCheckSchemaV1 = {
     "afterSnapshotId",
     "isFinalError",
     "snapshot",
+    "telegram",
   ],
   properties: checkProperties,
 } as const;
@@ -339,19 +351,17 @@ export const checkIntentListResponseSchemaV1 = {
 
 export const notificationEventSchemaV1 = {
   $id: "NotificationEventV1", type: "object", additionalProperties: false,
-  required: ["id", "kind", "monitorId", "monitorName", "url", "scopeRevision", "checkId", "chainCheckId", "title", "body", "observedAt", "targetPath", "dedupeKey", "telegram"],
+  required: ["id", "kind", "centerVisible", "monitorId", "monitorName", "url", "scopeRevision", "checkId", "chainCheckId", "title", "body", "observedAt", "targetPath", "dedupeKey", "telegram"],
   properties: {
     id: { type: "integer", minimum: 1 },
-    kind: { enum: ["change_detected", "check_failed_final"], type: "string" },
+    kind: { enum: ["change_detected", "check_failed_final", "control_check_ok"], type: "string" },
+    centerVisible: { type: "boolean" },
     monitorId: { type: "integer", minimum: 1 }, monitorName: { type: "string" },
     url: { type: "string" },
     scopeRevision: { type: "integer", minimum: 1 }, checkId: { type: "integer", minimum: 1 },
     chainCheckId: { type: "integer", minimum: 1 }, title: { type: "string" }, body: { type: "string" },
     observedAt: { type: "string", format: "date-time" }, targetPath: { type: "string" }, dedupeKey: { type: "string" },
-    telegram: { type: "object", additionalProperties: false, required: ["state", "failureReason"], properties: {
-      state: { enum: ["pending", "sending", "delivered", "unavailable", "permanent", "temporary", "timeout", "abandoned"], type: "string" },
-      failureReason: { type: ["string", "null"] },
-    } },
+    telegram: telegramDeliveryObjectSchema,
   },
 } as const;
 
@@ -457,6 +467,7 @@ export const journalCheckSchemaV1 = {
     "startedAt", "completedAt", "errorCode", "errorMessage",
     "beforeSnapshotId", "afterSnapshotId",
     "isFinalError",
+    "telegram",
   ],
   properties: {
     id: checkProperties.id,
@@ -472,7 +483,13 @@ export const journalCheckSchemaV1 = {
     beforeSnapshotId: checkProperties.beforeSnapshotId,
     afterSnapshotId: checkProperties.afterSnapshotId,
     isFinalError: checkProperties.isFinalError,
+    telegram: checkProperties.telegram,
   },
+} as const;
+
+export const notificationSettingsSchemaV1 = {
+  $id: "NotificationSettingsV1", type: "object", additionalProperties: false,
+  required: ["notifyWhenUnchanged"], properties: { notifyWhenUnchanged: { type: "boolean" } },
 } as const;
 
 export const journalResponseSchemaV1 = {
@@ -715,6 +732,15 @@ export const getTelegramStateRouteSchema: FastifySchema = {
 export const recheckTelegramRouteSchema: FastifySchema = {
   operationId: "recheckTelegram", summary: "Повторно проверить доступность Telegram",
   response: { 200: { $ref: "TelegramStateV1#" }, ...commonErrors },
+};
+export const getNotificationSettingsRouteSchema: FastifySchema = {
+  operationId: "getNotificationSettings", summary: "Получить настройки Уведомлений",
+  response: { 200: { $ref: "NotificationSettingsV1#" }, ...commonErrors },
+};
+export const updateNotificationSettingsRouteSchema: FastifySchema = {
+  operationId: "updateNotificationSettings", summary: "Изменить настройки Уведомлений",
+  body: { $ref: "NotificationSettingsV1#" },
+  response: { 200: { $ref: "NotificationSettingsV1#" }, 400: { $ref: "ApiErrorV1#" }, ...commonErrors },
 };
 
 export const getComparisonRouteSchema: FastifySchema = {

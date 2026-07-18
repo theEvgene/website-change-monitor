@@ -91,6 +91,7 @@ export interface MonitorService {
   listJournal(): JournalCheckRecord[];
   listActiveIntents(): CheckIntentRecord[];
   listNotifications(afterId?: number): NotificationFeed;
+  listLiveNotifications(afterId?: number): NotificationFeed;
   getComparison(id: number):
     | (SnapshotComparison & {
         checkId: number;
@@ -196,6 +197,7 @@ export function createMonitorService(options: {
               Buffer.from(snapshot.canonicalJson, "utf8"),
             )
           ) {
+            await prepareNotification();
             options.database.monitors.completeNoChange(
               claimed,
               completedAt.toISOString(),
@@ -288,6 +290,7 @@ export function createMonitorService(options: {
     listJournal: () => options.database.monitors.listJournal(),
     listActiveIntents: () => options.database.monitors.listActiveIntents(),
     listNotifications: (afterId) => options.database.monitors.listNotifications(afterId),
+    listLiveNotifications: (afterId) => options.database.monitors.listLiveNotifications(afterId),
     getComparison(id) {
       const pair = options.database.monitors.getComparison(id);
       if (pair === undefined) return undefined;

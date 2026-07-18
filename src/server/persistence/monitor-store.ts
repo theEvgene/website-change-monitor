@@ -49,7 +49,8 @@ export interface ClaimedCheck {
 
 export interface NotificationEventRecord {
   id: number;
-  kind: "change_detected" | "check_failed_final";
+  kind: "change_detected" | "check_failed_final" | "control_check_ok";
+  centerVisible: boolean;
   monitorId: number;
   monitorName: string;
   url: string;
@@ -93,6 +94,7 @@ export interface MonitorCheckRecord {
   afterSnapshotId: number | null;
   isFinalError: boolean;
   snapshot: (SnapshotRecord & { id: number }) | null;
+  telegram: NotificationEventRecord["telegram"] | null;
 }
 
 export interface MonitorRecord {
@@ -137,6 +139,7 @@ export interface JournalCheckRecord {
   beforeSnapshotId: number | null;
   afterSnapshotId: number | null;
   isFinalError: boolean;
+  telegram: NotificationEventRecord["telegram"] | null;
 }
 
 export interface ComparisonSnapshotPair {
@@ -188,6 +191,9 @@ export interface MonitorStore {
   getComparison(checkId: number): ComparisonSnapshotPair | undefined;
   getMonitor(id: number): MonitorRecord | undefined;
   listNotifications(afterId?: number): NotificationFeed;
+  listLiveNotifications(afterId?: number): NotificationFeed;
+  notificationSettings(): { notifyWhenUnchanged: boolean };
+  updateNotificationSettings(notifyWhenUnchanged: boolean): void;
   beginTelegramSession(bootId: string, available: boolean, now: string): void;
   setTelegramAvailable(available: boolean, now: string): void;
   claimTelegramDelivery(bootId: string, now: string): TelegramDeliveryJob | undefined;
@@ -481,9 +487,9 @@ export function createMonitorStore(
   `);
   const insertNotification = database.prepare(`
     INSERT INTO notification_events (
-      kind, monitor_id, monitor_name, scope_revision, check_id, chain_check_id,
+      kind, center_visible, monitor_id, monitor_name, scope_revision, check_id, chain_check_id,
       title, body, observed_at, target_path, dedupe_key, url
-    ) VALUES (@kind, @monitorId, @monitorName, @scopeRevision, @checkId, @chainCheckId,
+    ) VALUES (@kind, @centerVisible, @monitorId, @monitorName, @scopeRevision, @checkId, @chainCheckId,
       @title, @body, @observedAt, @targetPath, @dedupeKey, @url)
   `);
   const insertTelegramDelivery = database.prepare(`
@@ -494,10 +500,11 @@ export function createMonitorStore(
   function recordNotification(
     claimed: Pick<ClaimedCheck, "monitorId" | "monitorName" | "url" | "scopeRevision" | "checkId" | "chainCheckId">,
     completedAt: string,
-    event: Pick<NotificationEventRecord, "kind" | "title" | "body" | "targetPath" | "dedupeKey">,
+    event: Pick<NotificationEventRecord, "kind" | "centerVisible" | "title" | "body" | "targetPath" | "dedupeKey">,
   ): void {
     const inserted = insertNotification.run({
       ...event,
+      centerVisible: event.centerVisible ? 1 : 0,
       monitorId: claimed.monitorId,
       monitorName: claimed.monitorName,
       scopeRevision: claimed.scopeRevision,
@@ -515,7 +522,7 @@ export function createMonitorStore(
 
   function recordChangeNotification(claimed: ClaimedCheck, completedAt: string): void {
     recordNotification(claimed, completedAt, {
-      kind: "change_detected", title: "Обнаружено изменение",
+      kind: "change_detected", centerVisible: true, title: "Обнаружено изменение",
       body: `Монитор «${claimed.monitorName}»: страница изменилась.`,
       targetPath: `/?section=notifications&check=${claimed.checkId}`,
       dedupeKey: `change:${claimed.checkId}`,
@@ -528,10 +535,20 @@ export function createMonitorStore(
     errorMessage: string,
   ): void {
     recordNotification(claimed, completedAt, {
-      kind: "check_failed_final", title: "Проверка завершилась ошибкой",
+      kind: "check_failed_final", centerVisible: true, title: "Проверка завершилась ошибкой",
       body: `Монитор «${claimed.monitorName}»: ${errorMessage}`,
       targetPath: `/?section=journal&check=${claimed.checkId}`,
       dedupeKey: `final-error:${claimed.chainCheckId}`,
+    });
+  }
+
+  function recordControlNotification(claimed: ClaimedCheck, completedAt: string): void {
+    recordNotification(claimed, completedAt, {
+      kind: "control_check_ok", centerVisible: false,
+      title: "Проверка завершена без изменений",
+      body: `Монитор «${claimed.monitorName}»: изменений не обнаружено.`,
+      targetPath: `/?section=journal&check=${claimed.checkId}`,
+      dedupeKey: `control:${claimed.checkId}`,
     });
   }
 
@@ -617,6 +634,8 @@ export function createMonitorStore(
         ).changes,
       );
       assertChanged(finishIntent.run(completedAt, claimed.intentId).changes);
+      const settings = database.prepare("SELECT notify_when_unchanged FROM application_settings WHERE id = 1").get() as { notify_when_unchanged: 0 | 1 };
+      if (settings.notify_when_unchanged === 1) recordControlNotification(claimed, completedAt);
       replaceOrdinarySchedule(claimed, completedAt, nextCheckAt);
     },
   );
@@ -920,9 +939,11 @@ export function createMonitorStore(
           SELECT c.id, c.monitor_id, m.name monitor_name, c.kind, c.status,
                  c.result, c.started_at, c.completed_at, c.error_code,
                  c.error_message, c.before_snapshot_id, c.after_snapshot_id,
-                 c.is_final_error
+                 c.is_final_error, d.state telegram_state, d.failure_reason telegram_failure_reason
           FROM checks c
           JOIN monitors m ON m.id = c.monitor_id
+          LEFT JOIN notification_events e ON e.check_id = c.id
+          LEFT JOIN notification_deliveries d ON d.event_id = e.id AND d.channel = 'telegram'
           ORDER BY c.id DESC
         `)
         .all() as Array<{
@@ -939,6 +960,8 @@ export function createMonitorStore(
         before_snapshot_id: number | null;
         after_snapshot_id: number | null;
         is_final_error: 0 | 1;
+        telegram_state: NotificationEventRecord["telegram"]["state"] | null;
+        telegram_failure_reason: string | null;
       }>;
       return rows.map((row) => ({
         id: row.id,
@@ -954,6 +977,7 @@ export function createMonitorStore(
         beforeSnapshotId: row.before_snapshot_id,
         afterSnapshotId: row.after_snapshot_id,
         isFinalError: row.is_final_error === 1,
+        telegram: row.telegram_state === null ? null : { state: row.telegram_state, failureReason: row.telegram_failure_reason },
       }));
     },
     getComparison(checkId) {
@@ -1018,9 +1042,12 @@ export function createMonitorStore(
           SELECT c.id, c.kind, c.status, c.result, c.started_at,
                  c.completed_at, c.error_code, c.error_message,
                  c.before_snapshot_id, c.after_snapshot_id, c.is_final_error,
-                 s.id snapshot_id, s.format_version, s.sha256, s.canonical_json
+                 s.id snapshot_id, s.format_version, s.sha256, s.canonical_json,
+                 d.state telegram_state, d.failure_reason telegram_failure_reason
           FROM checks c
           LEFT JOIN snapshots s ON s.check_id = c.id
+          LEFT JOIN notification_events e ON e.check_id = c.id
+          LEFT JOIN notification_deliveries d ON d.event_id = e.id AND d.channel = 'telegram'
           WHERE c.monitor_id = ?
           ORDER BY c.id DESC
         `)
@@ -1040,6 +1067,8 @@ export function createMonitorStore(
         format_version: number | null;
         sha256: string | null;
         canonical_json: Buffer | null;
+        telegram_state: NotificationEventRecord["telegram"]["state"] | null;
+        telegram_failure_reason: string | null;
       }>;
       return {
         id: row.id,
@@ -1065,6 +1094,7 @@ export function createMonitorStore(
           beforeSnapshotId: check.before_snapshot_id,
           afterSnapshotId: check.after_snapshot_id,
           isFinalError: check.is_final_error === 1,
+          telegram: check.telegram_state === null ? null : { state: check.telegram_state, failureReason: check.telegram_failure_reason },
           snapshot:
             check.snapshot_id === null ||
             check.format_version === null ||
@@ -1081,27 +1111,17 @@ export function createMonitorStore(
       };
     },
     listNotifications(afterId = 0) {
-      const high = database.prepare(`SELECT COALESCE(MAX(id), 0) high FROM notification_events`).get() as { high: number };
-      const rows = database.prepare(`
-        SELECT e.id, e.kind, e.monitor_id, e.monitor_name, e.url, e.scope_revision, e.check_id,
-          e.chain_check_id, e.title, e.body, e.observed_at, e.target_path, e.dedupe_key,
-          d.state telegram_state, d.failure_reason
-        FROM notification_events e JOIN notification_deliveries d ON d.event_id = e.id AND d.channel = 'telegram'
-        WHERE e.id > ? ORDER BY e.id
-      `).all(afterId) as Array<{
-        id: number; kind: NotificationEventRecord["kind"]; monitor_id: number;
-        monitor_name: string; url: string; scope_revision: number; check_id: number;
-        chain_check_id: number; title: string; body: string; observed_at: string;
-        target_path: string; dedupe_key: string; telegram_state: NotificationEventRecord["telegram"]["state"]; failure_reason: string | null;
-      }>;
-      return { highWaterMark: high.high, items: rows.map((row) => ({
-        id: row.id, kind: row.kind, monitorId: row.monitor_id,
-        monitorName: row.monitor_name, url: row.url, scopeRevision: row.scope_revision,
-        checkId: row.check_id, chainCheckId: row.chain_check_id,
-        title: row.title, body: row.body, observedAt: row.observed_at,
-        targetPath: row.target_path, dedupeKey: row.dedupe_key,
-        telegram: { state: row.telegram_state, failureReason: row.failure_reason },
-      })) };
+      return notificationFeed(afterId, true);
+    },
+    listLiveNotifications(afterId = 0) {
+      return notificationFeed(afterId, false);
+    },
+    notificationSettings() {
+      const row = database.prepare("SELECT notify_when_unchanged FROM application_settings WHERE id = 1").get() as { notify_when_unchanged: 0 | 1 };
+      return { notifyWhenUnchanged: row.notify_when_unchanged === 1 };
+    },
+    updateNotificationSettings(notifyWhenUnchanged) {
+      assertChanged(database.prepare("UPDATE application_settings SET notify_when_unchanged = ? WHERE id = 1").run(notifyWhenUnchanged ? 1 : 0).changes);
     },
     beginTelegramSession(bootId, available, now) {
       database.transaction(() => {
@@ -1138,6 +1158,30 @@ export function createMonitorStore(
       database.prepare(`UPDATE notification_deliveries SET state = 'abandoned', failure_reason = 'Приложение остановлено до отправки.', updated_at = ? WHERE boot_id = ? AND state IN ('pending','sending')`).run(now, bootId);
     },
   };
+
+  function notificationFeed(afterId: number, centerOnly: boolean): NotificationFeed {
+      const high = database.prepare(`SELECT COALESCE(MAX(id), 0) high FROM notification_events`).get() as { high: number };
+      const rows = database.prepare(`
+        SELECT e.id, e.kind, e.center_visible, e.monitor_id, e.monitor_name, e.url, e.scope_revision, e.check_id,
+          e.chain_check_id, e.title, e.body, e.observed_at, e.target_path, e.dedupe_key,
+          d.state telegram_state, d.failure_reason
+        FROM notification_events e JOIN notification_deliveries d ON d.event_id = e.id AND d.channel = 'telegram'
+        WHERE e.id > ? AND (? = 0 OR e.center_visible = 1) ORDER BY e.id
+      `).all(afterId, centerOnly ? 1 : 0) as Array<{
+        id: number; kind: NotificationEventRecord["kind"]; center_visible: 0 | 1; monitor_id: number;
+        monitor_name: string; url: string; scope_revision: number; check_id: number;
+        chain_check_id: number; title: string; body: string; observed_at: string;
+        target_path: string; dedupe_key: string; telegram_state: NotificationEventRecord["telegram"]["state"]; failure_reason: string | null;
+      }>;
+      return { highWaterMark: high.high, items: rows.map((row) => ({
+        id: row.id, kind: row.kind, centerVisible: row.center_visible === 1, monitorId: row.monitor_id,
+        monitorName: row.monitor_name, url: row.url, scopeRevision: row.scope_revision,
+        checkId: row.check_id, chainCheckId: row.chain_check_id,
+        title: row.title, body: row.body, observedAt: row.observed_at,
+        targetPath: row.target_path, dedupeKey: row.dedupe_key,
+        telegram: { state: row.telegram_state, failureReason: row.failure_reason },
+      })) };
+  }
 }
 
 function intentFromRow(row: {

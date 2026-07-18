@@ -6,6 +6,7 @@ import {
   loadComparison,
   type ComparisonResponse,
 } from "./ComparisonModal.js";
+import { telegramDeliveryLabel, type TelegramDeliveryView } from "./telegram-delivery.js";
 
 interface JournalCheck {
   id: number;
@@ -20,6 +21,7 @@ interface JournalCheck {
   beforeSnapshotId: number | null;
   afterSnapshotId: number | null;
   isFinalError: boolean;
+  telegram: TelegramDeliveryView | null;
 }
 
 export function JournalWorkspace({ selectedCheckId }: { selectedCheckId: number | undefined }) {
@@ -48,13 +50,14 @@ export function JournalWorkspace({ selectedCheckId }: { selectedCheckId: number 
       {!failed && checks.length === 0 ? <p className="muted">Проверок пока нет.</p> : null}
       {checks.length > 0 ? (
         <table className="dense-table">
-          <thead><tr><th>Монитор</th><th>Время</th><th>Вид</th><th>Результат</th><th /></tr></thead>
+          <thead><tr><th>Монитор</th><th>Время</th><th>Вид</th><th>Результат</th><th>Telegram</th><th /></tr></thead>
           <tbody>{checks.map((check) => (
               <tr key={check.id} className={check.id === selectedCheckId ? "selected-check" : undefined} aria-current={check.id === selectedCheckId ? "true" : undefined}>
               <td>{check.monitorName}{check.id === selectedCheckId ? <span className="status-badge">Выбрано</span> : null}</td>
               <td>{formatDate(check.completedAt ?? check.startedAt)}</td>
               <td>{kindLabel(check.kind)}</td>
               <td>{resultLabel(check)}</td>
+              <td>{check.telegram == null ? "—" : telegramDeliveryLabel(check.telegram.state)}{check.telegram?.failureReason == null ? null : <small>{check.telegram.failureReason}</small>}</td>
               <td>{hasComparableSnapshots(check) ? (
                 <button className="table-link" type="button" onClick={() => void openComparison(check.id)}>
                   Открыть Сравнение
@@ -73,6 +76,7 @@ export function JournalWorkspace({ selectedCheckId }: { selectedCheckId: number 
     if (loaded !== null) setComparison(loaded);
   }
 }
+
 
 function kindLabel(kind: JournalCheck["kind"]): string {
   if (kind === "manual") return "Ручная";

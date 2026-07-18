@@ -7,6 +7,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -20,7 +21,7 @@ describe("startup UI", () => {
   });
 
   it("shows the health reported by the local application", async () => {
-    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       if (input === "/api/version") {
         return Promise.resolve(
           new Response(
@@ -36,6 +37,9 @@ describe("startup UI", () => {
 
       if (input === "/api/telegram/recheck") {
         return Promise.resolve(Response.json({ status: "available", reason: null }));
+      }
+      if (input === "/api/settings/notifications") {
+        return Promise.resolve(Response.json({ notifyWhenUnchanged: init?.method === "PUT" }));
       }
 
       return Promise.resolve(
@@ -62,6 +66,11 @@ describe("startup UI", () => {
     fireEvent.click(screen.getByRole("button", { name: "Проверить снова" }));
     expect(await screen.findByText("Telegram доступен")).toBeVisible();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    const controlSwitch = await screen.findByRole("switch", { name: "Уведомлять при отсутствии изменений" });
+    expect(controlSwitch).not.toBeChecked();
+    fireEvent.click(controlSwitch);
+    await waitFor(() => expect(controlSwitch).toBeChecked());
+    expect(fetchMock).toHaveBeenCalledWith("/api/settings/notifications", expect.objectContaining({ method: "PUT", body: JSON.stringify({ notifyWhenUnchanged: true }) }));
     expect(screen.getByText("Версия 0.1.0")).toBeVisible();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/health",
@@ -356,6 +365,7 @@ describe("startup UI", () => {
         if (input === "/api/monitors/7") {
           return Promise.resolve(Response.json({ ...created, paused }));
         }
+        if (input === "/api/settings/notifications") return Promise.resolve(Response.json({ notifyWhenUnchanged: false }));
         throw new Error(`Unexpected request: ${String(input)}`);
       },
     );
@@ -475,6 +485,7 @@ describe("startup UI", () => {
           }],
         }));
       }
+      if (input === "/api/settings/notifications") return Promise.resolve(Response.json({ notifyWhenUnchanged: false }));
       throw new Error(`Unexpected request: ${String(input)}`);
     });
     vi.stubGlobal("fetch", fetchMock);

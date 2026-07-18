@@ -6,6 +6,7 @@ import {
   loadComparison,
   type ComparisonResponse,
 } from "./ComparisonModal.js";
+import { telegramDeliveryLabel, type TelegramDeliveryView } from "./telegram-delivery.js";
 
 interface MonitorSummary {
   id: number;
@@ -37,6 +38,7 @@ interface MonitorCheck {
   beforeSnapshotId: number | null;
   afterSnapshotId: number | null;
   isFinalError: boolean;
+  telegram: TelegramDeliveryView | null;
 }
 
 interface MonitorDetail extends MonitorSummary {
@@ -156,6 +158,7 @@ export function MonitorsWorkspace({ refreshToken }: { refreshToken: number }) {
                   <strong>{checkLabel(check)}</strong>
                   <span>{formatDate(check.completedAt ?? check.startedAt)}</span>
                   {check.errorMessage === null ? null : <small>{check.errorMessage}</small>}
+                  {check.telegram == null ? null : <small>Telegram: {telegramDeliveryLabel(check.telegram.state)}{check.telegram.failureReason === null ? "" : ` — ${check.telegram.failureReason}`}</small>}
                   {hasComparableSnapshots(check) ? (
                     <button className="table-link" type="button" onClick={() => void openComparison(check.id)}>
                       Открыть Сравнение
@@ -230,6 +233,7 @@ export function MonitorsWorkspace({ refreshToken }: { refreshToken: number }) {
     }
   }
 }
+
 
 function MonitorEditor({ monitor, error, onSaved, onDeleted, onError }: { monitor: MonitorDetail; error: string | null; onSaved: (monitor: MonitorDetail) => void; onDeleted: () => void; onError: (message: string | null) => void }) {
   async function submit(form: HTMLFormElement, resetHistory = false): Promise<void> {

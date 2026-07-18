@@ -19,7 +19,7 @@ class FakeEventSource {
 }
 
 const first = {
-  id: 1, kind: "change_detected", monitorId: 7, monitorName: "Каталог",
+  id: 1, kind: "change_detected", centerVisible: true, monitorId: 7, monitorName: "Каталог",
   url: "https://example.com/catalog",
   scopeRevision: 1, checkId: 10, chainCheckId: 10,
   title: "Обнаружено изменение", body: "Монитор «Каталог»: страница изменилась.",
@@ -50,6 +50,10 @@ describe("Notifications UI", () => {
     const second = { ...replay, id: 3, checkId: 12, chainCheckId: 12, dedupeKey: "change:12", body: "Новое событие" };
     FakeEventSource.latest.emit(second); FakeEventSource.latest.emit(second);
     expect(await screen.findByRole("status")).toHaveTextContent("Новое событие");
+    expect(screen.getAllByRole("row")).toHaveLength(4);
+    const control = { ...second, id: 4, kind: "control_check_ok", centerVisible: false, checkId: 13, chainCheckId: 13, dedupeKey: "control:13", title: "Проверка завершена без изменений", body: "Изменений не обнаружено" };
+    FakeEventSource.latest.emit(control);
+    expect(await screen.findByRole("status")).toHaveTextContent("Изменений не обнаружено");
     expect(screen.getAllByRole("row")).toHaveLength(4);
     FakeEventSource.latest.emit({ ...second, telegram: { state: "temporary", failureReason: "Telegram недоступен." } }, "delivery");
     expect(await screen.findByText("Telegram недоступен.")).toBeVisible();

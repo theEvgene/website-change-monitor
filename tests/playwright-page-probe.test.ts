@@ -528,7 +528,7 @@ describe("Playwright PageProbe", () => {
     ).resolves.toMatchObject({ ok: false, code: "address_blocked" });
   });
 
-  it("fails when a late page request targets a blocked address", async () => {
+  it("blocks a late private subresource without failing the public page", async () => {
     const probe = createPlaywrightPageProbe(browser, {
       networkAccess: fixtureNetworkAccess(),
       timings: fastTimings(),
@@ -541,11 +541,12 @@ describe("Playwright PageProbe", () => {
         exclusionSelectors: [],
       }),
     ).resolves.toMatchObject({
-      ok: false,
-      code: "address_blocked",
-      finalUrl: `${fixtureUrl}/late-block`,
-      httpStatus: 200,
-      timings: { totalMs: expect.any(Number) },
+      ok: true,
+      preview: {
+        finalUrl: `${fixtureUrl}/late-block`,
+        httpStatus: 200,
+        timings: { totalMs: expect.any(Number) },
+      },
     });
   });
 

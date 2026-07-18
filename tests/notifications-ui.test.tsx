@@ -107,4 +107,19 @@ describe("Notifications UI", () => {
     fireEvent.focus(window);
     expect(await screen.findByRole("button", { name: "Включить уведомления браузера" })).toBeVisible();
   });
+
+  it("closes comparison from its backdrop but not from the dialog content", async () => {
+    const comparison = { checkId: 10, monitorId: 7, monitorName: "Каталог", beforeSnapshotId: 1, afterSnapshotId: 2, complete: true, targets: [] };
+    vi.stubGlobal("Notification", class { static permission = "denied"; static requestPermission = vi.fn(); });
+    vi.stubGlobal("EventSource", FakeEventSource);
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: RequestInfo | URL) => Promise.resolve(
+      input === "/api/notifications" ? Response.json({ highWaterMark: 1, items: [first] }) : Response.json(comparison),
+    )));
+    const { container } = render(<NotificationsWorkspace centerVisible selectedCheckId={10} onOpenJournal={vi.fn()} />);
+    const dialog = await screen.findByRole("dialog", { name: "Сравнение" });
+    fireEvent.click(dialog);
+    expect(dialog).toBeVisible();
+    fireEvent.click(container.querySelector(".comparison-backdrop")!);
+    expect(screen.queryByRole("dialog", { name: "Сравнение" })).not.toBeInTheDocument();
+  });
 });

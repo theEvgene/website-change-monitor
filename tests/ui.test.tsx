@@ -59,19 +59,28 @@ describe("startup UI", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("Приложение работает с ограничениями")).toBeVisible();
-    expect(screen.getByText("SQLite готова · схема 1")).toBeVisible();
-    expect(screen.getByText("Telegram пока не настроен")).toBeVisible();
-    expect(screen.getByRole("alert")).toHaveTextContent("Telegram недоступен");
+    const systemStatus = await screen.findByRole("button", { name: "Система работает с ограничениями" });
+    expect(systemStatus).toBeVisible();
+    expect(screen.queryByText("SQLite готова · схема 1")).not.toBeInTheDocument();
+    fireEvent.click(systemStatus);
+    const statusDialog = screen.getByRole("dialog", { name: "Состояние системы" });
+    expect(statusDialog).toHaveTextContent("SQLite готова · схема 1");
+    expect(statusDialog).toHaveTextContent("Telegram пока не настроен");
+    expect(statusDialog).toHaveTextContent("v0.1.0");
+    expect(statusDialog).not.toHaveTextContent("Диагностика");
     fireEvent.click(screen.getByRole("button", { name: "Проверить снова" }));
     expect(await screen.findByText("Telegram доступен")).toBeVisible();
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    fireEvent.click(within(statusDialog).getByRole("button", { name: "Закрыть" }));
+    expect(screen.queryByRole("switch", { name: "Уведомлять при отсутствии изменений" })).not.toBeInTheDocument();
+    const settingsButton = screen.getByRole("button", { name: "Настройки" });
+    expect(settingsButton).toHaveAttribute("title", "Настройки");
+    fireEvent.click(settingsButton);
+    expect(screen.getByRole("dialog", { name: "Настройки" })).toBeVisible();
     const controlSwitch = await screen.findByRole("switch", { name: "Уведомлять при отсутствии изменений" });
     expect(controlSwitch).not.toBeChecked();
     fireEvent.click(controlSwitch);
     await waitFor(() => expect(controlSwitch).toBeChecked());
     expect(fetchMock).toHaveBeenCalledWith("/api/settings/notifications", expect.objectContaining({ method: "PUT", body: JSON.stringify({ notifyWhenUnchanged: true }) }));
-    expect(screen.getByText("Версия 0.1.0")).toBeVisible();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/health",
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
@@ -80,6 +89,55 @@ describe("startup UI", () => {
       "/api/version",
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
+  });
+
+  it("closes dialogs from the backdrop and protects an edited monitor form", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: RequestInfo | URL) => Promise.resolve(
+      input === "/api/settings/notifications"
+        ? Response.json({ notifyWhenUnchanged: false })
+        : input === "/api/version"
+          ? Response.json({ application: "website-change-monitor", apiVersion: "v1", version: "0.1.0" })
+          : Response.json({
+              application: "website-change-monitor",
+              status: "ready",
+              version: "0.1.0",
+              database: { status: "ready", schemaVersion: 1 },
+              telegram: { status: "available", reason: null },
+            }),
+    )));
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const { container } = render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Добавить монитор" }));
+    const monitorDialog = screen.getByRole("dialog", { name: "Проверить Область наблюдения" });
+    fireEvent.click(within(monitorDialog).getByRole("button", { name: "Закрыть добавление монитора" }));
+    expect(screen.queryByRole("dialog", { name: "Проверить Область наблюдения" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Добавить монитор" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "URL страницы" }), { target: { value: "https://example.com" } });
+    const backdrop = container.querySelector(".app-modal-backdrop");
+    expect(backdrop).not.toBeNull();
+    fireEvent.click(backdrop!);
+    expect(confirm).toHaveBeenCalledWith("Внесённые изменения не сохранены и будут потеряны. Закрыть окно?");
+    expect(screen.getByRole("dialog", { name: "Проверить Область наблюдения" })).toBeVisible();
+
+    confirm.mockReturnValue(true);
+    fireEvent.click(backdrop!);
+    expect(screen.queryByRole("dialog", { name: "Проверить Область наблюдения" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Система работает" }));
+    const statusDialog = screen.getByRole("dialog", { name: "Состояние системы" });
+    fireEvent.click(statusDialog);
+    expect(statusDialog).toBeVisible();
+    fireEvent.click(statusDialog.parentElement!);
+    expect(screen.queryByRole("dialog", { name: "Состояние системы" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Настройки" }));
+    const settingsDialog = screen.getByRole("dialog", { name: "Настройки" });
+    fireEvent.click(settingsDialog);
+    expect(settingsDialog).toBeVisible();
+    fireEvent.click(settingsDialog.parentElement!);
+    expect(screen.queryByRole("dialog", { name: "Настройки" })).not.toBeInTheDocument();
   });
 
   it("previews repeatable target and exclusion selectors through the public API", async () => {
@@ -124,6 +182,7 @@ describe("startup UI", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<App />);
 
+    fireEvent.click(await screen.findByRole("button", { name: "Добавить монитор" }));
     fireEvent.change(await screen.findByLabelText("URL страницы"), {
       target: { value: "https://example.com/start" },
     });
@@ -185,6 +244,7 @@ describe("startup UI", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<App />);
 
+    fireEvent.click(await screen.findByRole("button", { name: "Добавить монитор" }));
     expect(
       screen.queryByRole("button", {
         name: "Удалить: Целевой CSS-селектор 1",
@@ -372,6 +432,7 @@ describe("startup UI", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<App />);
 
+    fireEvent.click(await screen.findByRole("button", { name: "Добавить монитор" }));
     fireEvent.change(await screen.findByLabelText("URL страницы"), {
       target: { value: created.url },
     });

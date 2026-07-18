@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import {
   PreviewInputError,
   type PreviewSelectorField,
@@ -51,8 +51,10 @@ const emptyFieldErrors = (): FieldErrors => ({
 
 export function PreviewPanel({
   onMonitorCreated,
+  onDirtyChange,
 }: {
   onMonitorCreated?: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const [url, setUrl] = useState("");
   const [selectors, setSelectors] = useState<
@@ -70,6 +72,15 @@ export function PreviewPanel({
   const [saveState, setSaveState] = useState<
     { kind: "idle" | "saving" | "saved" } | { kind: "error"; message: string }
   >({ kind: "idle" });
+
+  useEffect(() => {
+    onDirtyChange?.(
+      url !== "" ||
+      targetSelectors.length !== 1 || targetSelectors[0] !== "" ||
+      exclusionSelectors.length !== 0 ||
+      monitorName !== "" || monitorLabels !== "" || intervalHours !== 24,
+    );
+  }, [exclusionSelectors, intervalHours, monitorLabels, monitorName, onDirtyChange, targetSelectors, url]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

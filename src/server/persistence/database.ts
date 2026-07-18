@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
 
 import BetterSqlite3 from "better-sqlite3";
+
+import { applicationPaths } from "../operations/paths.js";
 
 import { initialMigration } from "./migrations/001-initial.js";
 import { monitorsMigration } from "./migrations/002-monitors.js";
@@ -13,6 +14,8 @@ import { notificationsMigration } from "./migrations/007-notifications.js";
 import { telegramDeliveryMigration } from "./migrations/008-telegram-delivery.js";
 import { controlNotificationsMigration } from "./migrations/009-control-notifications.js";
 import { createMonitorStore, type MonitorStore } from "./monitor-store.js";
+import { verifyDatabaseFile } from "./maintenance.js";
+import { latestSchemaVersion } from "./schema-version.js";
 
 export interface DatabaseDiagnostics {
   status: "ready";
@@ -40,6 +43,8 @@ export interface DatabaseInspection {
   status: "ready";
   schemaVersion: number | null;
   telegramExecutablePath: string | null;
+  quickCheck: "ok" | null;
+  foreignKeyViolations: 0 | null;
 }
 
 const migrations = [
@@ -54,13 +59,21 @@ const migrations = [
   controlNotificationsMigration,
 ];
 
+if (migrations.at(-1)?.version !== latestSchemaVersion) {
+  throw new Error("latestSchemaVersion не соответствует последней миграции.");
+}
+
 export function openApplicationDatabase(
   options: OpenApplicationDatabaseOptions,
 ): ApplicationDatabase {
-  const dataDirectory = join(options.rootDirectory, "data");
+  const paths = applicationPaths(options.rootDirectory);
+  const dataDirectory = paths.data;
   mkdirSync(dataDirectory, { recursive: true });
 
-  const databasePath = join(dataDirectory, "website-change-monitor.sqlite3");
+  const databasePath = paths.database;
+  if (existsSync(databasePath)) {
+    verifyDatabaseFile(databasePath);
+  }
   const database = new BetterSqlite3(databasePath);
 
   database.pragma("journal_mode = WAL");
@@ -143,8 +156,12 @@ export function inspectApplicationDatabase(
       status: "ready",
       schemaVersion: null,
       telegramExecutablePath: null,
+      quickCheck: null,
+      foreignKeyViolations: null,
     };
   }
+
+  verifyDatabaseFile(path);
 
   const database = new BetterSqlite3(path, {
     readonly: true,
@@ -161,6 +178,8 @@ export function inspectApplicationDatabase(
         status: "ready",
         schemaVersion: 0,
         telegramExecutablePath: null,
+        quickCheck: "ok",
+        foreignKeyViolations: 0,
       };
     }
     const row = database
@@ -175,6 +194,8 @@ export function inspectApplicationDatabase(
       status: "ready",
       schemaVersion: row.version,
       telegramExecutablePath: telegram?.value ?? null,
+      quickCheck: "ok",
+      foreignKeyViolations: 0,
     };
   } finally {
     database.close();
@@ -182,7 +203,7 @@ export function inspectApplicationDatabase(
 }
 
 function applicationDatabasePath(rootDirectory: string): string {
-  return join(rootDirectory, "data", "website-change-monitor.sqlite3");
+  return applicationPaths(rootDirectory).database;
 }
 
 function synchronousName(value: number): "full" {

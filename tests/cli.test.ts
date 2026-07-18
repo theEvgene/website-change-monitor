@@ -26,6 +26,8 @@ describe("command line", () => {
           { name: "runtime", status: "ready" },
           { name: "data", status: "ready" },
           { name: "database", status: "ready", schemaVersion: null },
+          { name: "migrations", status: "ready" },
+          { name: "chromium", status: "ready" },
           { name: "port", status: "ready" },
           { name: "telegram", status: "degraded", code: "not_configured" },
         ],
@@ -111,7 +113,11 @@ async function runCli(
     ["node_modules/tsx/dist/cli.mjs", "src/server/cli.ts", command],
     {
       cwd: process.cwd(),
-      env: { ...process.env, LOCALAPPDATA: localAppData },
+      env: {
+        ...process.env,
+        LOCALAPPDATA: localAppData,
+        WEBSITE_CHANGE_MONITOR_BROWSER_PATH: process.execPath,
+      },
       stdio: ["ignore", "pipe", "pipe"],
     },
   );

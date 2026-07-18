@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -22,6 +22,7 @@ describe("doctor", () => {
           architecture: "x64",
           windowsRelease: "10.0.26200",
         },
+        browserExecutablePath: process.execPath,
       });
 
       expect(report.status).toBe("degraded");
@@ -30,6 +31,8 @@ describe("doctor", () => {
         { name: "runtime", status: "ready" },
         { name: "data", status: "ready" },
         { name: "database", status: "ready", schemaVersion: null },
+        { name: "migrations", status: "ready" },
+        { name: "chromium", status: "ready" },
         { name: "port", status: "ready" },
         {
           name: "telegram",
@@ -55,6 +58,7 @@ describe("doctor", () => {
           architecture: "x64",
           windowsRelease: "10.0.26200",
         },
+        browserExecutablePath: process.execPath,
       });
 
       expect(report.status).toBe("fatal");
@@ -84,6 +88,7 @@ describe("doctor", () => {
           architecture: "x64",
           windowsRelease: "10.0.26200",
         },
+        browserExecutablePath: process.execPath,
       });
 
       expect(report.status).toBe("fatal");
@@ -124,6 +129,7 @@ describe("doctor", () => {
           architecture: "x64",
           windowsRelease: "10.0.26200",
         },
+        browserExecutablePath: process.execPath,
         inspectTelegram: async () => true,
       });
 
@@ -132,5 +138,27 @@ describe("doctor", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+
+  it("allows an intact older schema to proceed to forward migrations", async () => {
+    const root = await mkdtemp(join(tmpdir(), "website-change-monitor-old-schema-"));
+    await mkdir(join(root, "data"), { recursive: true });
+    const sqlite = new BetterSqlite3(join(root, "data", "website-change-monitor.sqlite3"));
+    sqlite.exec(`
+      CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, applied_at TEXT NOT NULL) STRICT;
+      CREATE TABLE application_metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;
+      INSERT INTO schema_migrations VALUES (1, '001-initial', '2026-01-01T00:00:00.000Z');
+    `);
+    sqlite.close();
+    try {
+      const report = await runDoctor({
+        rootDirectory: root,
+        port: 0,
+        runtime: { nodeVersion: "24.14.0", platform: "win32", architecture: "x64", windowsRelease: "10.0.26200" },
+        browserExecutablePath: process.execPath,
+      });
+      expect(report.checks).toContainEqual({ name: "migrations", status: "ready" });
+      expect(report.status).toBe("degraded");
+    } finally { await rm(root, { recursive: true, force: true }); }
   });
 });

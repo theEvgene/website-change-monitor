@@ -5,7 +5,9 @@ import { dirname } from "node:path";
 
 import { inspectTelegramExecutable } from "../notifications/telegram-dispatcher.js";
 import { inspectApplicationDatabase } from "../persistence/database.js";
+import { latestSchemaVersion } from "../persistence/schema-version.js";
 import { isWebsiteChangeMonitorAtPort } from "./instance.js";
+import { applicationPaths } from "./paths.js";
 
 export interface RuntimeFacts {
   nodeVersion: string;
@@ -15,7 +17,7 @@ export interface RuntimeFacts {
 }
 
 type ReadyCheck = {
-  name: "runtime" | "data" | "port";
+  name: "runtime" | "data" | "port" | "chromium" | "migrations";
   status: "ready";
 };
 
@@ -34,7 +36,7 @@ type TelegramCheck =
     };
 
 type FatalCheck = {
-  name: "runtime" | "data" | "database" | "port";
+  name: "runtime" | "data" | "database" | "port" | "chromium" | "migrations";
   status: "fatal";
   code: string;
 };
@@ -56,6 +58,7 @@ export interface RunDoctorOptions {
   port: number;
   runtime: RuntimeFacts;
   inspectTelegram?: (executablePath: string | null) => Promise<boolean>;
+  browserExecutablePath?: string;
 }
 
 export async function runDoctor(
@@ -83,10 +86,17 @@ export async function runDoctor(
       status: "ready",
       schemaVersion: database.schemaVersion,
     });
+    checks.push(database.schemaVersion === null || database.schemaVersion <= latestSchemaVersion
+      ? { name: "migrations", status: "ready" }
+      : { name: "migrations", status: "fatal", code: "schema_newer_than_application" });
   } catch {
     checks.push({ name: "database", status: "fatal", code: "database_unavailable" });
+    checks.push({ name: "migrations", status: "fatal", code: "migration_state_unavailable" });
   }
 
+  checks.push(options.browserExecutablePath !== undefined && existsSync(options.browserExecutablePath)
+    ? { name: "chromium", status: "ready" }
+    : { name: "chromium", status: "fatal", code: "chromium_unavailable" });
   checks.push(await checkPort(options.port));
   const telegramConfigured = telegramExecutablePath !== null;
   const telegramAvailable = await (options.inspectTelegram
@@ -117,6 +127,13 @@ async function checkDataRoot(rootDirectory: string): Promise<DoctorCheck> {
         };
       }
       await access(rootDirectory, constants.R_OK | constants.W_OK);
+      const paths = applicationPaths(rootDirectory);
+      for (const path of [paths.data, paths.backups, paths.logs, paths.browsers]) {
+        if (!existsSync(path)) continue;
+        const child = await stat(path);
+        if (!child.isDirectory()) return { name: "data", status: "fatal", code: "application_path_not_directory" };
+        await access(path, constants.R_OK | constants.W_OK);
+      }
       return { name: "data", status: "ready" };
     }
 

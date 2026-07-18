@@ -2,18 +2,56 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { release } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 
-import { launchPlaywrightPageProbe } from "./browser-playwright/playwright-page-probe.js";
 import { inspectTelegramExecutable } from "./notifications/telegram-dispatcher.js";
 import { openInDefaultBrowser } from "./operations/browser.js";
 import { runDoctor } from "./operations/doctor.js";
-import { applicationRoot } from "./operations/paths.js";
+import { createNdjsonLogger } from "./operations/logger.js";
+import { applicationPaths, applicationRoot } from "./operations/paths.js";
 import { startApplication } from "./operations/start.js";
 import { openApplicationDatabase } from "./persistence/database.js";
+import { createManualBackup, restoreManualBackup } from "./persistence/maintenance.js";
+import { isWebsiteChangeMonitorAtPort } from "./operations/instance.js";
 
 const port = 43117;
 
+async function browserExecutablePath(): Promise<string> {
+  if (process.env.WEBSITE_CHANGE_MONITOR_BROWSER_PATH !== undefined) {
+    return process.env.WEBSITE_CHANGE_MONITOR_BROWSER_PATH;
+  }
+  const { chromium } = await import("playwright");
+  return chromium.executablePath();
+}
+
 async function main(): Promise<void> {
   const command = process.argv[2];
+  const rootDirectory = applicationRoot(process.env);
+  const paths = applicationPaths(rootDirectory);
+  process.env.PLAYWRIGHT_BROWSERS_PATH = paths.browsers;
+  if (command === "backup" || command === "restore") {
+    if (await isWebsiteChangeMonitorAtPort(port)) {
+      process.stderr.write("Остановите Website Change Monitor перед backup или restore.\n");
+      process.exitCode = 1;
+      return;
+    }
+    try {
+      if (command === "backup") {
+        const marker = process.argv.indexOf("--output");
+        const output = marker < 0 ? undefined : process.argv[marker + 1];
+        const created = await createManualBackup(rootDirectory, output);
+        process.stdout.write(`Резервная копия создана: ${created}\n`);
+      } else {
+        const marker = process.argv.indexOf("--input");
+        const input = marker < 0 ? undefined : process.argv[marker + 1];
+        if (input === undefined) throw new Error("Укажите --input <absolute-or-backup-path>.");
+        const restored = restoreManualBackup(rootDirectory, input);
+        process.stdout.write(`База данных восстановлена: ${restored}\n`);
+      }
+    } catch (error) {
+      process.stderr.write(`${safeErrorMessage(error)}\n`);
+      process.exitCode = 1;
+    }
+    return;
+  }
   if (command === "configure") {
     const marker = process.argv.indexOf("--telegram-executable");
     const executable = marker < 0 ? undefined : process.argv[marker + 1];
@@ -26,15 +64,16 @@ async function main(): Promise<void> {
       process.exitCode = 1;
       return;
     }
-    const database = openApplicationDatabase({ rootDirectory: applicationRoot(process.env) });
+    const database = openApplicationDatabase({ rootDirectory });
     try { database.configureTelegramExecutable(executable); } finally { database.close(); }
     process.stdout.write(`Telegram executable сохранён: ${executable}\n`); return;
   }
   if (command === "doctor") {
     const report = await runDoctor({
-      rootDirectory: applicationRoot(process.env),
+      rootDirectory,
       port,
       runtime: currentRuntime(),
+      browserExecutablePath: await browserExecutablePath(),
     });
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
     process.exitCode = report.exitCode;
@@ -42,11 +81,11 @@ async function main(): Promise<void> {
   }
 
   if (command === "start") {
-    const rootDirectory = applicationRoot(process.env);
     const preflight = await runDoctor({
       rootDirectory,
       port,
       runtime: currentRuntime(),
+      browserExecutablePath: await browserExecutablePath(),
     });
     if (preflight.status === "fatal") {
       process.stderr.write(`${JSON.stringify(preflight, null, 2)}\n`);
@@ -60,7 +99,10 @@ async function main(): Promise<void> {
       port,
       version: applicationVersion(),
       openBrowser: openInDefaultBrowser,
-      startPageProbe: launchPlaywrightPageProbe,
+      startPageProbe: async () => {
+        const { launchPlaywrightPageProbe } = await import("./browser-playwright/playwright-page-probe.js");
+        return launchPlaywrightPageProbe();
+      },
     });
 
     if (outcome.kind === "existing") {
@@ -69,6 +111,8 @@ async function main(): Promise<void> {
     }
 
     process.stdout.write(`Website Change Monitor: http://127.0.0.1:${port}/\n`);
+    const logger = createNdjsonLogger(paths.logs);
+    logger.write("application_started", { port });
     let closing = false;
     const close = () => {
       if (closing) {
@@ -78,6 +122,7 @@ async function main(): Promise<void> {
       void outcome.close().then(
         () => {
           process.stdout.write("Website Change Monitor остановлен.\n");
+          logger.write("application_stopped");
         },
         (error: unknown) => {
           process.stderr.write(`${safeErrorMessage(error)}\n`);
@@ -90,7 +135,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  process.stderr.write("Использование: website-change-monitor <start|doctor|configure>\n");
+  process.stderr.write("Использование: website-change-monitor <start|doctor|configure|backup|restore>\n");
   process.exitCode = 1;
 }
 

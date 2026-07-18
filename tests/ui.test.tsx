@@ -458,6 +458,12 @@ describe("startup UI", () => {
     );
 
     expect(await screen.findByRole("cell", { name: "Каталог" })).toBeVisible();
+    const monitorsWorkspace = screen.getByRole("region", { name: "Мониторы" });
+    expect(within(monitorsWorkspace).queryByRole("heading", { name: "Сохранённые Мониторы" })).not.toBeInTheDocument();
+    expect(within(monitorsWorkspace).getByRole("combobox", { name: "Фильтр по метке" })).toBeVisible();
+    expect(within(monitorsWorkspace).getByRole("columnheader", { name: "Последний результат" })).toBeVisible();
+    expect(within(monitorsWorkspace).getByRole("columnheader", { name: "Состояние" })).toBeVisible();
+    expect(within(monitorsWorkspace).getByRole("cell", { name: "Включён" })).toBeVisible();
     const historyPanel = screen.getByText("История Монитора").closest("aside");
     expect(historyPanel).not.toBeNull();
     expect(
@@ -469,8 +475,10 @@ describe("startup UI", () => {
     expect(await within(historyPanel!).findByRole("alert")).toHaveTextContent("Не удалось приостановить");
     fireEvent.click(within(historyPanel!).getByRole("button", { name: "Приостановить" }));
     expect(await within(historyPanel!).findByText("Автоматические Проверки приостановлены")).toBeVisible();
+    expect(within(monitorsWorkspace).getByRole("cell", { name: "Приостановлен" })).toBeVisible();
     fireEvent.click(within(historyPanel!).getByRole("button", { name: "Возобновить" }));
     expect(await within(historyPanel!).findByRole("button", { name: "Приостановить" })).toBeVisible();
+    expect(within(monitorsWorkspace).getByRole("cell", { name: "Включён" })).toBeVisible();
     fireEvent.click(
       within(historyPanel!).getByRole("button", { name: "Запустить сейчас" }),
     );

@@ -386,6 +386,33 @@ main {
   border-radius: 8px;
 }
 
+.monitors-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.monitor-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #526174;
+  font-size: 14px;
+}
+
+.monitor-filter select {
+  min-height: 34px;
+  padding: 5px 30px 5px 9px;
+  color: #1f2937;
+  background: #fff;
+  border: 1px solid #cbd4df;
+  border-radius: 6px;
+}
+
+.monitors-toolbar .status-badge { margin: 0; }
+
 .journal-panel > h2 {
   margin: 6px 0 20px;
 }

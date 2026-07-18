@@ -12,6 +12,12 @@ export interface SafeProxy {
   close(): Promise<void>;
 }
 
+export function protectProxySocket(socket: Socket): void {
+  socket.on("error", () => {
+    socket.destroy();
+  });
+}
+
 export async function startSafeProxy(
   networkAccess: NetworkAccess,
   onBlocked: (error: unknown) => void,
@@ -20,6 +26,7 @@ export async function startSafeProxy(
   let closed = false;
   const trackSocket = (socket: Socket) => {
     sockets.add(socket);
+    protectProxySocket(socket);
     socket.once("close", () => sockets.delete(socket));
   };
   const server = createServer((incoming, outgoing) => {

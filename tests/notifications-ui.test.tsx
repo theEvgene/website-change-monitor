@@ -2,7 +2,7 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { NotificationsWorkspace } from "../src/ui/NotificationsWorkspace.js";
@@ -97,10 +97,13 @@ describe("Notifications UI", () => {
     ));
     vi.stubGlobal("Notification", DeniedNotification); vi.stubGlobal("EventSource", FakeEventSource); vi.stubGlobal("fetch", fetchMock);
     render(<NotificationsWorkspace centerVisible selectedCheckId={undefined} onOpenJournal={openJournal} />);
+    const notifications = screen.getByRole("region", { name: "Уведомления" });
+    expect(within(notifications).queryByRole("heading", { name: "Уведомления" })).not.toBeInTheDocument();
+    expect(within(notifications).queryByText("Центр событий")).not.toBeInTheDocument();
     expect(await screen.findByText("Уведомления браузера запрещены в настройках.")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Открыть Сравнение" }));
+    fireEvent.click(screen.getByRole("button", { name: "Открыть сравнение" }));
     expect(await screen.findByRole("dialog", { name: "Сравнение" })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Открыть Проверку" }));
+    fireEvent.click(screen.getByRole("button", { name: "Открыть проверку" }));
     expect(openJournal).toHaveBeenCalledWith(12);
     expect(DeniedNotification.requestPermission).not.toHaveBeenCalled();
     DeniedNotification.permission = "default";

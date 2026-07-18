@@ -43,9 +43,7 @@ export function JournalWorkspace({ selectedCheckId }: { selectedCheckId: number 
   }, []);
 
   return (
-    <section className="journal-panel" aria-labelledby="journal-title">
-      <p className="eyebrow">Все проверки</p>
-      <h2 id="journal-title">Журнал</h2>
+    <section className="journal-panel" aria-label="Журнал">
       {failed ? <p className="form-error" role="alert">Не удалось загрузить Журнал.</p> : null}
       {!failed && checks.length === 0 ? <p className="muted">Проверок пока нет.</p> : null}
       {checks.length > 0 ? (
@@ -60,7 +58,7 @@ export function JournalWorkspace({ selectedCheckId }: { selectedCheckId: number 
               <td>{check.telegram == null ? "—" : telegramDeliveryLabel(check.telegram.state)}{check.telegram?.failureReason == null ? null : <small>{check.telegram.failureReason}</small>}</td>
               <td>{hasComparableSnapshots(check) ? (
                 <button className="table-link" type="button" onClick={() => void openComparison(check.id)}>
-                  Открыть Сравнение
+                  Открыть сравнение
                 </button>
               ) : null}</td>
             </tr>

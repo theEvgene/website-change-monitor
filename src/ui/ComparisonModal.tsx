@@ -47,10 +47,7 @@ export function ComparisonModal({
     <div className="comparison-backdrop" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <section className="comparison-dialog" role="dialog" aria-modal="true" aria-label="Сравнение">
         <header className="comparison-header">
-          <div>
-            <p className="eyebrow">Проверка #{comparison.checkId}</p>
-            <h2>Сравнение · {comparison.monitorName}</h2>
-          </div>
+          <h2>Сравнение · {comparison.monitorName}</h2>
           <button className="secondary-button" type="button" onClick={onClose}>Закрыть</button>
         </header>
         {!comparison.complete ? (
@@ -61,13 +58,9 @@ export function ComparisonModal({
         <div className="comparison-column-headings" aria-hidden="true">
           <strong>Прежнее состояние</strong><strong>Новое состояние</strong>
         </div>
-        <div className="comparison-targets">
-          {comparison.targets.map((target, index) => (
-            <article className="comparison-target" key={index}>
-              <h3>Целевая область {index + 1}</h3>
-              <DiffSection title="Структура" rows={target.structure} />
-              <DiffSection title="Текст" rows={target.text} />
-            </article>
+        <div className="comparison-text-diff">
+          {comparison.targets.flatMap((target) => target.text).map((row, index) => (
+            <DiffRowView row={row} key={index} />
           ))}
         </div>
       </section>
@@ -75,20 +68,15 @@ export function ComparisonModal({
   );
 }
 
-function DiffSection({ title, rows }: { title: string; rows: DiffRow[] }) {
-  return (
-    <section className="diff-section">
-      <h4>{title}</h4>
-      {rows.map((row, index) => row.kind === "omitted" ? (
-        <div className="diff-omitted" key={index}>
-          Пропущено строк: слева {row.omittedBefore ?? 0}, справа {row.omittedAfter ?? 0}
-        </div>
-      ) : (
-        <div className={`diff-row diff-row--${row.kind}`} key={index}>
-          <pre className={row.kind === "equal" ? undefined : "diff-before"}>{row.before ?? ""}</pre>
-          <pre className={row.kind === "equal" ? undefined : "diff-after"}>{row.after ?? ""}</pre>
-        </div>
-      ))}
-    </section>
+function DiffRowView({ row }: { row: DiffRow }) {
+  return row.kind === "omitted" ? (
+    <div className="diff-omitted">
+      Пропущено строк: слева {row.omittedBefore ?? 0}, справа {row.omittedAfter ?? 0}
+    </div>
+  ) : (
+    <div className={`diff-row diff-row--${row.kind}`}>
+      <pre className={row.kind === "replace" || row.kind === "delete" ? "diff-before" : undefined}>{row.before ?? ""}</pre>
+      <pre className={row.kind === "replace" || row.kind === "insert" ? "diff-after" : undefined}>{row.after ?? ""}</pre>
+    </div>
   );
 }

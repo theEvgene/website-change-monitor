@@ -88,19 +88,19 @@ export function MonitorsWorkspace({ refreshToken }: { refreshToken: number }) {
   }, [refreshToken, labelFilter]);
 
   return (
-    <section className="monitors-workspace" aria-labelledby="monitors-title">
+    <section className="monitors-workspace" aria-label="Мониторы">
       <div className="monitors-table-panel">
-        <label>Фильтр по метке <select aria-label="Фильтр по метке" value={labelFilter} onChange={(event) => setLabelFilter(event.target.value)}><option value="">Все Метки</option>{availableLabels.map((label) => <option key={label} value={label}>{label}</option>)}</select></label>
-        {operationNotice === null ? null : <p className="status-badge" role="status">{operationNotice}</p>}
-        <p className="eyebrow">Мониторы</p>
-        <h2 id="monitors-title">Сохранённые Мониторы</h2>
+        <div className="monitors-toolbar">
+          <label className="monitor-filter">Фильтр по метке <select aria-label="Фильтр по метке" value={labelFilter} onChange={(event) => setLabelFilter(event.target.value)}><option value="">Все метки</option>{availableLabels.map((label) => <option key={label} value={label}>{label}</option>)}</select></label>
+          {operationNotice === null ? null : <p className="status-badge" role="status">{operationNotice}</p>}
+        </div>
         {monitors.length === 0 ? (
-          <p className="muted">Сохранённых Мониторов пока нет.</p>
+          <p className="muted">Мониторов пока нет.</p>
         ) : (
           <table className="dense-table">
             <thead>
               <tr>
-                <th>Монитор</th><th>Метки</th><th>Интервал</th><th>Последняя Проверка</th><th>Состояние</th><th>Следующая Проверка</th>
+                <th>Монитор</th><th>Метки</th><th>Интервал</th><th>Последний результат</th><th>Состояние</th><th>Следующая проверка</th>
               </tr>
             </thead>
             <tbody>
@@ -110,7 +110,7 @@ export function MonitorsWorkspace({ refreshToken }: { refreshToken: number }) {
                   <td>{monitor.labels?.join(", ") || "—"}</td>
                   <td>{monitor.intervalHours} ч</td>
                   <td>{resultLabel(monitor.latestCheckResult)}</td>
-                  <td>{monitor.paused ? "Приостановлен" : activeIntentLabel(monitor.activeIntent)}</td>
+                  <td>{monitor.paused ? "Приостановлен" : "Включён"}</td>
                   <td>{formatDate(monitor.nextCheckAt)}</td>
                 </tr>
               ))}

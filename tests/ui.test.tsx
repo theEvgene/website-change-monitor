@@ -141,7 +141,7 @@ describe("startup UI", () => {
   });
 
   it("previews repeatable target and exclusion selectors through the public API", async () => {
-    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       if (input === "/api/version") {
         return Promise.resolve(
           Response.json({
@@ -327,6 +327,8 @@ describe("startup UI", () => {
     };
     let saved = false;
     let manualRequested = false;
+    let finishManualCheck!: () => void;
+    const manualCheckGate = new Promise<void>((resolve) => { finishManualCheck = resolve; });
     let paused = false;
     let pauseFailures = 1;
     const fetchMock = vi.fn().mockImplementation(
@@ -390,7 +392,7 @@ describe("startup UI", () => {
         }
         if (input === "/api/monitors/7/checks" && init?.method === "POST") {
           manualRequested = true;
-          return Promise.resolve(
+          return manualCheckGate.then(() =>
             Response.json({
               ...created,
               nextCheckAt: "2026-07-18T09:00:00.000Z",
@@ -491,9 +493,15 @@ describe("startup UI", () => {
     fireEvent.click(
       within(historyPanel!).getByRole("button", { name: "Запустить сейчас" }),
     );
+    const loadingMonitorButton = within(historyPanel!).getByRole("button", { name: "Проверка выполняется…" });
+    expect(loadingMonitorButton).toBeDisabled();
+    expect(loadingMonitorButton.querySelector(".button-spinner")).not.toBeNull();
+    finishManualCheck();
     expect(
       await within(historyPanel!).findByText("Ручная проверка · Без изменений"),
     ).toBeVisible();
+    expect(await screen.findByRole("status")).toHaveTextContent("Проверка выполнена.");
+    expect(within(historyPanel!).getByRole("button", { name: "Запустить сейчас" })).toBeEnabled();
     expect(manualRequested).toBe(true);
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/monitors",
@@ -512,7 +520,9 @@ describe("startup UI", () => {
   });
 
   it("opens a Comparison from the Journal and returns to the same context", async () => {
-    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+    let finishManualCheck!: () => void;
+    const manualCheckGate = new Promise<void>((resolve) => { finishManualCheck = resolve; });
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       if (input === "/api/version") {
         return Promise.resolve(Response.json({
           application: "website-change-monitor", apiVersion: "v1", version: "0.1.0",
@@ -524,6 +534,9 @@ describe("startup UI", () => {
           database: { status: "ready", schemaVersion: 3 },
           telegram: { status: "unavailable", reason: "not_configured" },
         }));
+      }
+      if (input === "/api/monitors/7/checks" && init?.method === "POST") {
+        return manualCheckGate.then(() => Response.json({ id: 7 }));
       }
       if (input === "/api/monitors") return Promise.resolve(Response.json([]));
       if (input === "/api/checks") {
@@ -580,14 +593,35 @@ describe("startup UI", () => {
     const journal = screen.getByRole("region", { name: "Журнал" });
     expect(within(journal).queryByRole("heading", { name: "Журнал" })).not.toBeInTheDocument();
     expect(within(journal).queryByText("Все проверки")).not.toBeInTheDocument();
-    expect((await screen.findAllByRole("cell", { name: "Catalog" }))[0]).toBeVisible();
-    const monitorLinks = screen.getAllByRole("link", { name: "Catalog" });
+    const resultFilter = within(journal).getByRole("combobox", { name: "Результат" });
+    expect(resultFilter).toHaveValue("change");
+    expect(await within(journal).findByRole("cell", { name: "Catalog" })).toBeVisible();
+    expect(within(journal).queryByRole("cell", { name: "Окончательная ошибка" })).not.toBeInTheDocument();
+    const monitorLinks = within(journal).getAllByRole("link", { name: "Catalog" });
     expect(monitorLinks[0]).toHaveAttribute("href", "https://example.com/catalog");
     expect(monitorLinks[0]).toHaveAttribute("target", "_blank");
     expect(monitorLinks[0]).toHaveAttribute("rel", "noopener noreferrer");
-    expect(screen.getByRole("cell", { name: "Окончательная ошибка" })).toBeVisible();
+    const journalCheckButton = within(journal).getByRole("button", { name: "Запустить сейчас: Catalog" });
+    fireEvent.click(journalCheckButton);
+    const loadingJournalButton = within(journal).getByRole("button", { name: "Проверка выполняется: Catalog" });
+    expect(loadingJournalButton).toBeDisabled();
+    expect(loadingJournalButton.querySelector(".button-spinner")).not.toBeNull();
+    finishManualCheck();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/monitors/7/checks", expect.objectContaining({ method: "POST" })));
+    expect(await screen.findByRole("status")).toHaveTextContent("Проверка выполнена.");
+    expect(within(journal).queryByText("Проверка выполнена.")).not.toBeInTheDocument();
+    expect(within(journal).getByRole("button", { name: "Запустить сейчас: Catalog" })).toBeEnabled();
+
+    fireEvent.change(resultFilter, { target: { value: "error" } });
+    expect(within(journal).getByRole("cell", { name: "Окончательная ошибка" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Мониторы" }));
+    fireEvent.click(screen.getByRole("button", { name: "Журнал" }));
+    expect(within(screen.getByRole("region", { name: "Журнал" })).getByRole("combobox", { name: "Результат" })).toHaveValue("error");
+    fireEvent.change(screen.getByRole("combobox", { name: "Результат" }), { target: { value: "change" } });
+    await within(screen.getByRole("region", { name: "Журнал" })).findByRole("cell", { name: "Catalog" });
+
     const comparisonButtons = screen.getAllByRole("button", { name: "Открыть сравнение" });
-    expect(comparisonButtons).toHaveLength(2);
+    expect(comparisonButtons).toHaveLength(1);
     fireEvent.click(comparisonButtons[0]!);
 
     const dialog = await screen.findByRole("dialog", { name: "Сравнение" });

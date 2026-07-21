@@ -24,7 +24,6 @@ interface NotificationFeed { highWaterMark: number; items: NotificationEvent[] }
 
 export function NotificationsWorkspace({ centerVisible, selectedCheckId, onOpenJournal }: { centerVisible: boolean; selectedCheckId: number | undefined; onOpenJournal: (checkId: number) => void }) {
   const [items, setItems] = useState<NotificationEvent[]>([]);
-  const [toast, setToast] = useState<NotificationEvent | null>(null);
   const [comparison, setComparison] = useState<ComparisonResponse | null>(null);
   const [permission, setPermission] = useState<NotificationPermission | "unsupported">(
     notificationPermission(),
@@ -90,12 +89,12 @@ export function NotificationsWorkspace({ centerVisible, selectedCheckId, onOpenJ
       </tr>)}</tbody>
     </table>}
     {comparison === null ? null : <ComparisonModal comparison={comparison} onClose={() => setComparison(null)} />}
-  </section>{toast === null ? null : <div className="status-panel" role="status"><strong>{toast.title}</strong><p>{toast.body}</p><button type="button" onClick={() => setToast(null)}>Закрыть</button></div>}</>;
+  </section></>;
 
   function append(event: NotificationEvent, live: boolean) {
     if (event.centerVisible) setItems((current) => current.some((item) => item.id === event.id) ? current : [...current, event]);
     if (!live || popupSeen.current.has(event.id)) { popupSeen.current.add(event.id); return; }
-    popupSeen.current.add(event.id); deliverBrowserNotification(event, setToast);
+    popupSeen.current.add(event.id); deliverBrowserNotification(event);
   }
 
   async function requestPermission() {
@@ -109,17 +108,15 @@ export function NotificationsWorkspace({ centerVisible, selectedCheckId, onOpenJ
   }
 }
 
-function deliverBrowserNotification(event: NotificationEvent, showToast: (event: NotificationEvent) => void): void {
-  if (document.visibilityState === "visible" || notificationPermission() !== "granted") {
-    showToast(event); return;
-  }
+function deliverBrowserNotification(event: NotificationEvent): void {
+  if (notificationPermission() !== "granted") return;
   try {
     const notification = new Notification(event.title, { body: event.body, tag: `website-change-monitor-${event.id}` });
     notification.onclick = () => {
       window.focus(); window.history.pushState({}, "", event.targetPath);
       window.dispatchEvent(new PopStateEvent("popstate")); notification.close();
     };
-  } catch { showToast(event); }
+  } catch { /* Browser delivery is optional; the Notification center remains authoritative. */ }
 }
 
 function notificationPermission(): NotificationPermission | "unsupported" {

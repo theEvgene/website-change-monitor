@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 import { PreviewPanel } from "./PreviewPanel.js";
 import { MonitorsWorkspace } from "./MonitorsWorkspace.js";
-import { JournalWorkspace } from "./JournalWorkspace.js";
+import { JournalWorkspace, type JournalResultFilter } from "./JournalWorkspace.js";
 import { NotificationsWorkspace } from "./NotificationsWorkspace.js";
 
 interface HealthResponse {
@@ -25,6 +25,11 @@ interface VersionResponse {
   version: string;
 }
 
+interface OperationToast {
+  tone: "success" | "error";
+  message: string;
+}
+
 type HealthState =
   | { kind: "loading" }
   | { kind: "loaded"; health: HealthResponse; version: VersionResponse }
@@ -42,6 +47,14 @@ export function App() {
   const [monitorDialogDirty, setMonitorDialogDirty] = useState(false);
   const [showStatusDialog, setShowStatusDialog] = useState(false);
   const [showSettingsDialog, setShowSettingsDialog] = useState(false);
+  const [journalResultFilter, setJournalResultFilter] = useState<JournalResultFilter>("change");
+  const [operationToast, setOperationToast] = useState<OperationToast | null>(null);
+
+  useEffect(() => {
+    if (operationToast === null) return;
+    const timer = window.setTimeout(() => setOperationToast(null), 5_000);
+    return () => window.clearTimeout(timer);
+  }, [operationToast]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -138,10 +151,24 @@ export function App() {
       </header>
 
       <main>
-        {activeSection === "monitors" ? <MonitorsWorkspace refreshToken={monitorRefresh} /> : null}
-        {activeSection === "journal" ? <JournalWorkspace selectedCheckId={selectedCheckId} /> : null}
+        {activeSection === "monitors" ? <MonitorsWorkspace refreshToken={monitorRefresh} onManualCheckResult={showManualCheckResult} /> : null}
+        {activeSection === "journal" ? (
+          <JournalWorkspace
+            selectedCheckId={selectedCheckId}
+            resultFilter={journalResultFilter}
+            onResultFilterChange={setJournalResultFilter}
+            onManualCheckResult={showManualCheckResult}
+          />
+        ) : null}
         <NotificationsWorkspace centerVisible={activeSection === "notifications"} selectedCheckId={selectedCheckId} onOpenJournal={(checkId) => navigateTo("journal", checkId)} />
       </main>
+
+      {operationToast === null ? null : (
+        <div className={`operation-toast operation-toast--${operationToast.tone}`} role={operationToast.tone === "error" ? "alert" : "status"}>
+          <span>{operationToast.message}</span>
+          <button type="button" aria-label="Закрыть уведомление" onClick={() => setOperationToast(null)}>×</button>
+        </div>
+      )}
 
       {showMonitorDialog ? (
         <div className="app-modal-backdrop" onClick={(event) => { if (event.target === event.currentTarget) requestMonitorDialogClose(); }}>
@@ -168,6 +195,12 @@ export function App() {
   function navigateTo(section: "journal" | "notifications", checkId: number) {
     window.history.pushState({}, "", `/?section=${section}&check=${checkId}`);
     setActiveSection(section); setSelectedCheckId(checkId);
+  }
+
+  function showManualCheckResult(succeeded: boolean) {
+    setOperationToast(succeeded
+      ? { tone: "success", message: "Проверка выполнена." }
+      : { tone: "error", message: "Не удалось выполнить Проверку." });
   }
 
   async function recheckTelegram() {

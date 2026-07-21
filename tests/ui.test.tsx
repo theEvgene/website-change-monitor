@@ -362,6 +362,7 @@ describe("startup UI", () => {
             }),
           );
         }
+        if (input === "/api/labels") return Promise.resolve(Response.json(["existing", "Новости"]));
         if (input === "/api/monitors" && init?.method === "POST") {
           saved = true;
           return Promise.resolve(Response.json(created, { status: 201 }));
@@ -453,6 +454,14 @@ describe("startup UI", () => {
     fireEvent.change(screen.getByLabelText("Интервал проверки"), {
       target: { value: "24" },
     });
+    const labelsInput = screen.getByRole("combobox", { name: "Метки" });
+    fireEvent.focus(labelsInput);
+    fireEvent.change(labelsInput, { target: { value: "EX" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Добавить метку existing" }));
+    fireEvent.change(labelsInput, { target: { value: "Новая" } });
+    fireEvent.keyDown(labelsInput, { key: "Enter" });
+    expect(screen.getByRole("button", { name: "Удалить метку existing" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Удалить метку Новая" })).toBeVisible();
     fireEvent.click(
       screen.getByRole("button", { name: "Сохранить Монитор" }),
     );
@@ -496,7 +505,7 @@ describe("startup UI", () => {
           targetSelectors: [".card"],
           exclusionSelectors: [],
           intervalHours: 24,
-          labels: [],
+          labels: ["existing", "Новая"],
         }),
       }),
     );

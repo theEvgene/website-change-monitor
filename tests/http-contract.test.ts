@@ -32,6 +32,7 @@ describe("public HTTP contract", () => {
       "/api/checks",
       "/api/checks/{checkId}/comparison",
       "/api/health",
+      "/api/labels",
       "/api/monitors",
       "/api/monitors/{monitorId}",
       "/api/monitors/{monitorId}/checks",
@@ -47,6 +48,7 @@ describe("public HTTP contract", () => {
     ]);
     expect(document.paths["/api/health"]?.get?.operationId).toBe("getHealth");
     expect(document.paths["/api/checks"]?.get?.operationId).toBe("listJournal");
+    expect(document.paths["/api/labels"]?.get?.operationId).toBe("listLabels");
     expect(document.paths["/api/check-intents"]?.get?.operationId).toBe("listCheckIntents");
     expect(document.paths["/api/checks/{checkId}/comparison"]?.get?.operationId).toBe("getComparison");
     expect(document.paths["/api/preview"]?.post?.operationId).toBe(
@@ -86,6 +88,7 @@ describe("public HTTP contract", () => {
       "HealthResponseV1",
       "JournalCheckV1",
       "JournalResponseV1",
+      "LabelListResponseV1",
       "MonitorCheckListResponseV1",
       "MonitorCheckV1",
       "MonitorCreateRequestV1",

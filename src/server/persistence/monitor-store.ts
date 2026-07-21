@@ -1,5 +1,7 @@
 import type BetterSqlite3 from "better-sqlite3";
 
+import { normalizeLabelKey } from "../domain/label.js";
+
 export type CheckIntentKind = "scheduled" | "overdue" | "manual" | "retry";
 export type CheckStatus = "running" | "succeeded" | "failed";
 export type CheckResult = "baseline" | "no_change" | "change" | "error";
@@ -187,6 +189,7 @@ export interface MonitorStore {
   ): void;
   setPaused(monitorId: number, paused: boolean, now: string): boolean | undefined;
   listMonitors(label?: string): MonitorSummaryRecord[];
+  listLabels(): string[];
   listJournal(): JournalCheckRecord[];
   listActiveIntents(): CheckIntentRecord[];
   getComparison(checkId: number): ComparisonSnapshotPair | undefined;
@@ -227,6 +230,7 @@ export function createMonitorStore(
   const upsertLabel = database.prepare(`INSERT INTO labels (name, normalized_name) VALUES (?, ?) ON CONFLICT(normalized_name) DO NOTHING`);
   const selectLabel = database.prepare(`SELECT id FROM labels WHERE normalized_name = ?`);
   const linkLabel = database.prepare(`INSERT INTO monitor_labels (monitor_id, label_id) VALUES (?, ?)`);
+  const deleteOrphanLabels = database.prepare(`DELETE FROM labels WHERE NOT EXISTS (SELECT 1 FROM monitor_labels WHERE monitor_labels.label_id = labels.id)`);
 
   function replaceLabels(monitorId: number, labels: string[]): void {
     database.prepare(`DELETE FROM monitor_labels WHERE monitor_id = ?`).run(monitorId);
@@ -236,6 +240,7 @@ export function createMonitorStore(
       const row = selectLabel.get(normalized) as { id: number };
       linkLabel.run(monitorId, row.id);
     }
+    deleteOrphanLabels.run();
   }
 
   const createMonitorTransaction = database.transaction(
@@ -278,9 +283,11 @@ export function createMonitorStore(
     return true;
   });
 
-  const deleteMonitorTransaction = database.transaction((id: number) =>
-    database.prepare(`DELETE FROM monitors WHERE id = ?`).run(id).changes === 1,
-  );
+  const deleteMonitorTransaction = database.transaction((id: number) => {
+    const deleted = database.prepare(`DELETE FROM monitors WHERE id = ?`).run(id).changes === 1;
+    if (deleted) deleteOrphanLabels.run();
+    return deleted;
+  });
 
   const selectMonitorRevision = database.prepare(`
     SELECT scope_revision FROM monitors WHERE id = ?
@@ -916,6 +923,14 @@ export function createMonitorStore(
         activeIntent: intentFromJoinedRow(row, row.name),
       }));
     },
+    listLabels() {
+      return (database.prepare(`
+        SELECT l.name
+        FROM labels l
+        WHERE EXISTS (SELECT 1 FROM monitor_labels ml WHERE ml.label_id = l.id)
+        ORDER BY l.normalized_name
+      `).all() as Array<{ name: string }>).map((row) => row.name);
+    },
     listActiveIntents() {
       const rows = database.prepare(`
         SELECT i.id, i.monitor_id, m.name monitor_name, i.scope_revision,
@@ -1230,9 +1245,6 @@ function selectLabels(database: BetterSqlite3.Database, monitorId: number): stri
   `).all(monitorId) as Array<{ name: string }>).map((row) => row.name);
 }
 
-function normalizeLabelKey(value: string): string {
-  return value.trim().normalize("NFC").toUpperCase().toLowerCase();
-}
 
 function assertChanged(changes: number): void {
   if (changes !== 1) {

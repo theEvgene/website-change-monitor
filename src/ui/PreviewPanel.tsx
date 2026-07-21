@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { normalizeLabel, normalizeLabelKey } from "../server/domain/label.js";
 import {
   PreviewInputError,
   type PreviewSelectorField,
@@ -67,7 +68,8 @@ export function PreviewPanel({
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>(emptyFieldErrors);
   const [state, setState] = useState<PreviewState>({ kind: "idle" });
   const [monitorName, setMonitorName] = useState("");
-  const [monitorLabels, setMonitorLabels] = useState("");
+  const [monitorLabels, setMonitorLabels] = useState<string[]>([]);
+  const [availableLabels, setAvailableLabels] = useState<string[]>([]);
   const [intervalHours, setIntervalHours] = useState(24);
   const [saveState, setSaveState] = useState<
     { kind: "idle" | "saving" | "saved" } | { kind: "error"; message: string }
@@ -78,9 +80,18 @@ export function PreviewPanel({
       url !== "" ||
       targetSelectors.length !== 1 || targetSelectors[0] !== "" ||
       exclusionSelectors.length !== 0 ||
-      monitorName !== "" || monitorLabels !== "" || intervalHours !== 24,
+      monitorName !== "" || monitorLabels.length !== 0 || intervalHours !== 24,
     );
   }, [exclusionSelectors, intervalHours, monitorLabels, monitorName, onDirtyChange, targetSelectors, url]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch("/api/labels", { headers: { accept: "application/json" }, signal: controller.signal })
+      .then(async (response) => response.ok ? await response.json() as unknown : [])
+      .then((labels) => setAvailableLabels(Array.isArray(labels) ? labels.filter((value): value is string => typeof value === "string") : []))
+      .catch((error: unknown) => { if (!(error instanceof DOMException && error.name === "AbortError")) setAvailableLabels([]); });
+    return () => controller.abort();
+  }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -165,7 +176,7 @@ export function PreviewPanel({
           name: monitorName.trim(),
           ...state.input,
           intervalHours,
-          labels: monitorLabels.split(",").map((value) => value.trim()).filter(Boolean),
+          labels: monitorLabels,
         }),
       });
       const body = (await response.json()) as ApiErrorBody;
@@ -342,10 +353,7 @@ export function PreviewPanel({
                   }}
                 />
               </label>
-              <label>
-                <span>Метки через запятую</span>
-                <input value={monitorLabels} onChange={(event) => { setMonitorLabels(event.target.value); setSaveState({ kind: "idle" }); }} />
-              </label>
+              <TagAutocomplete values={monitorLabels} suggestions={availableLabels} onChange={(labels) => { setMonitorLabels(labels); setSaveState({ kind: "idle" }); }} />
               <label>
                 <span>Интервал проверки</span>
                 <select
@@ -380,6 +388,46 @@ export function PreviewPanel({
       </div>
     </section>
   );
+}
+
+function TagAutocomplete({ values, suggestions, onChange }: { values: string[]; suggestions: string[]; onChange: (values: string[]) => void }) {
+  const [query, setQuery] = useState("");
+  const [focused, setFocused] = useState(false);
+  const normalizedValues = new Set(values.map(normalizeLabelKey));
+  const matches = suggestions.filter((label) => !normalizedValues.has(normalizeLabelKey(label)) && normalizeLabelKey(label).includes(normalizeLabelKey(query)));
+
+  function add(value: string) {
+    const trimmed = normalizeLabel(value);
+    if (trimmed === "" || normalizedValues.has(normalizeLabelKey(trimmed))) { setQuery(""); return; }
+    onChange([...values, trimmed]);
+    setQuery("");
+  }
+
+  return <div className="tag-field">
+    <label htmlFor="monitor-labels">Метки</label>
+    <div className="tag-input-shell">
+      {values.map((label) => <span className="tag-chip" key={normalizeLabelKey(label)}>{label}<button type="button" aria-label={`Удалить метку ${label}`} onClick={() => onChange(values.filter((value) => normalizeLabelKey(value) !== normalizeLabelKey(label)))}>×</button></span>)}
+      <input
+        id="monitor-labels"
+        role="combobox"
+        aria-autocomplete="list"
+        aria-expanded={focused && matches.length > 0}
+        aria-controls="monitor-label-suggestions"
+        value={query}
+        placeholder="Выберите или добавьте метку"
+        onFocus={() => setFocused(true)}
+        onBlur={() => window.setTimeout(() => setFocused(false), 100)}
+        onChange={(event) => setQuery(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === ",") { event.preventDefault(); add(query); }
+          if (event.key === "Backspace" && query === "" && values.length > 0) onChange(values.slice(0, -1));
+        }}
+      />
+    </div>
+    {focused && matches.length > 0 ? <ul className="tag-suggestions" id="monitor-label-suggestions">
+      {matches.map((label) => <li key={normalizeLabelKey(label)}><button type="button" aria-label={`Добавить метку ${label}`} onMouseDown={(event) => event.preventDefault()} onClick={() => add(label)}>{label}</button></li>)}
+    </ul> : null}
+  </div>;
 }
 
 interface SelectorGroupProps {

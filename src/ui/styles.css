@@ -370,6 +370,25 @@ main {
   border-radius: 6px;
 }
 
+.tag-field { position: relative; }
+.tag-field > label { display: block; margin-bottom: 6px; font-weight: 700; }
+.tag-input-shell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 42px;
+  padding: 5px;
+  background: #fff;
+  border: 1px solid #cbd4df;
+  border-radius: 6px;
+}
+.tag-input-shell input { flex: 1 1 180px; min-width: 140px; padding: 4px; border: 0; outline: 0; }
+.tag-chip { display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; color: #174a84; background: #e7f1ff; border-radius: 999px; }
+.tag-chip button { padding: 0; color: inherit; background: transparent; border: 0; cursor: pointer; }
+.tag-suggestions { position: absolute; z-index: 3; right: 0; left: 0; max-height: 180px; margin: 4px 0 0; padding: 4px; overflow: auto; list-style: none; background: #fff; border: 1px solid #cbd4df; border-radius: 6px; box-shadow: 0 8px 22px rgb(15 23 42 / 16%); }
+.tag-suggestions button { width: 100%; padding: 8px; text-align: left; background: transparent; border: 0; border-radius: 4px; cursor: pointer; }
+.tag-suggestions button:hover { background: #edf4fd; }
+
 .monitors-workspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(18rem, 0.34fr);

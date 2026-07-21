@@ -418,6 +418,12 @@ export const monitorListResponseSchemaV1 = {
   items: { $ref: "MonitorSummaryV1#" },
 } as const;
 
+export const labelListResponseSchemaV1 = {
+  $id: "LabelListResponseV1",
+  type: "array",
+  items: { type: "string" },
+} as const;
+
 export const monitorDetailSchemaV1 = {
   $id: "MonitorDetailV1",
   type: "object",
@@ -625,6 +631,12 @@ export const listMonitorsRouteSchema: FastifySchema = {
     200: { $ref: "MonitorListResponseV1#" },
     ...commonErrors,
   },
+};
+
+export const listLabelsRouteSchema: FastifySchema = {
+  operationId: "listLabels",
+  tags: ["monitors"],
+  response: { 200: { $ref: "LabelListResponseV1#" } },
 };
 
 export const updateMonitorRouteSchema: FastifySchema = {

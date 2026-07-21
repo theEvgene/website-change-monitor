@@ -210,6 +210,7 @@ describe("Monitors HTTP API", () => {
         id: changedCheckId,
         monitorId,
         monitorName: "Catalog",
+        url: "https://example.com/catalog",
         kind: "manual",
         result: "change",
       }),

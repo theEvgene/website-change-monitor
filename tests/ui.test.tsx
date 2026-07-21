@@ -520,6 +520,7 @@ describe("startup UI", () => {
       if (input === "/api/checks") {
         return Promise.resolve(Response.json([{
           id: 22, monitorId: 7, monitorName: "Catalog", kind: "manual",
+          url: "https://example.com/catalog",
           status: "succeeded", result: "change",
           startedAt: "2026-07-17T09:00:00.000Z",
           completedAt: "2026-07-17T09:00:01.000Z",
@@ -527,6 +528,7 @@ describe("startup UI", () => {
           beforeSnapshotId: 3, afterSnapshotId: 4,
         }, {
           id: 21, monitorId: 7, monitorName: "Catalog", kind: "scheduled",
+          url: "https://example.com/catalog",
           status: "succeeded", result: "no_change",
           startedAt: "2026-07-17T08:00:00.000Z",
           completedAt: "2026-07-17T08:00:01.000Z",
@@ -535,6 +537,7 @@ describe("startup UI", () => {
           isFinalError: false,
         }, {
           id: 20, monitorId: 7, monitorName: "Catalog", kind: "retry",
+          url: "https://example.com/catalog",
           status: "failed", result: "error",
           startedAt: "2026-07-17T07:00:00.000Z",
           completedAt: "2026-07-17T07:00:01.000Z",
@@ -569,6 +572,10 @@ describe("startup UI", () => {
     expect(within(journal).queryByRole("heading", { name: "Журнал" })).not.toBeInTheDocument();
     expect(within(journal).queryByText("Все проверки")).not.toBeInTheDocument();
     expect((await screen.findAllByRole("cell", { name: "Catalog" }))[0]).toBeVisible();
+    const monitorLinks = screen.getAllByRole("link", { name: "Catalog" });
+    expect(monitorLinks[0]).toHaveAttribute("href", "https://example.com/catalog");
+    expect(monitorLinks[0]).toHaveAttribute("target", "_blank");
+    expect(monitorLinks[0]).toHaveAttribute("rel", "noopener noreferrer");
     expect(screen.getByRole("cell", { name: "Окончательная ошибка" })).toBeVisible();
     const comparisonButtons = screen.getAllByRole("button", { name: "Открыть сравнение" });
     expect(comparisonButtons).toHaveLength(2);

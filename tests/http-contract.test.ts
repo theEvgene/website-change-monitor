@@ -102,6 +102,10 @@ describe("public HTTP contract", () => {
       "TelegramStateV1",
       "VersionResponseV1",
     ]);
+    expect(document.components.schemas.JournalCheckV1).toMatchObject({
+      required: expect.arrayContaining(["url"]),
+      properties: { url: { type: "string", format: "uri" } },
+    });
     expect(document.components.schemas.PreviewRequestV1).toMatchObject({
       required: ["url", "targetSelectors", "exclusionSelectors"],
       properties: {

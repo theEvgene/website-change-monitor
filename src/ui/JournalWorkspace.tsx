@@ -12,6 +12,7 @@ interface JournalCheck {
   id: number;
   monitorId: number;
   monitorName: string;
+  url: string;
   kind: "scheduled" | "overdue" | "manual" | "retry";
   status: "running" | "succeeded" | "failed";
   result: "baseline" | "no_change" | "change" | "error" | null;
@@ -51,7 +52,7 @@ export function JournalWorkspace({ selectedCheckId }: { selectedCheckId: number 
           <thead><tr><th>Монитор</th><th>Время</th><th>Вид</th><th>Результат</th><th>Telegram</th><th /></tr></thead>
           <tbody>{checks.map((check) => (
               <tr key={check.id} className={check.id === selectedCheckId ? "selected-check" : undefined} aria-current={check.id === selectedCheckId ? "true" : undefined}>
-              <td>{check.monitorName}{check.id === selectedCheckId ? <span className="status-badge">Выбрано</span> : null}</td>
+              <td><a className="table-link" href={check.url} target="_blank" rel="noopener noreferrer">{check.monitorName}</a>{check.id === selectedCheckId ? <span className="status-badge">Выбрано</span> : null}</td>
               <td>{formatDate(check.completedAt ?? check.startedAt)}</td>
               <td>{kindLabel(check.kind)}</td>
               <td>{resultLabel(check)}</td>

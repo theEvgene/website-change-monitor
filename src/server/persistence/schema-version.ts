@@ -1,1 +1,1 @@
-export const latestSchemaVersion = 9;
+export const latestSchemaVersion = 10;

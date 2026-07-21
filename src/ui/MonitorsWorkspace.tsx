@@ -47,11 +47,10 @@ interface MonitorDetail extends MonitorSummary {
   history: MonitorCheck[];
 }
 
-export function MonitorsWorkspace({ refreshToken }: { refreshToken: number }) {
+export function MonitorsWorkspace({ refreshToken, onManualCheckResult }: { refreshToken: number; onManualCheckResult: (succeeded: boolean) => void }) {
   const [monitors, setMonitors] = useState<MonitorSummary[]>([]);
   const [selected, setSelected] = useState<MonitorDetail | null>(null);
   const [manualBusy, setManualBusy] = useState(false);
-  const [manualError, setManualError] = useState<string | null>(null);
   const [pauseBusy, setPauseBusy] = useState(false);
   const [pauseError, setPauseError] = useState<string | null>(null);
   const [comparison, setComparison] = useState<ComparisonResponse | null>(null);
@@ -134,7 +133,7 @@ export function MonitorsWorkspace({ refreshToken }: { refreshToken: number }) {
               disabled={manualBusy}
               onClick={() => void requestManualCheck(selected.id)}
             >
-              {manualBusy ? "Проверка выполняется…" : "Запустить сейчас"}
+              {manualBusy ? <><span className="button-spinner" aria-hidden="true" />Проверка выполняется…</> : "Запустить сейчас"}
             </button>
             {pauseError === null ? null : <p className="form-error" role="alert">{pauseError}</p>}
             <button
@@ -145,9 +144,6 @@ export function MonitorsWorkspace({ refreshToken }: { refreshToken: number }) {
             >
               {selected.paused ? "Возобновить" : "Приостановить"}
             </button>
-            {manualError === null ? null : (
-              <p className="form-error" role="alert">{manualError}</p>
-            )}
             <dl className="monitor-settings">
               <div><dt>URL</dt><dd>{selected.url}</dd></div>
               <div><dt>Область наблюдения</dt><dd>ревизия {selected.scopeRevision}</dd></div>
@@ -182,7 +178,6 @@ export function MonitorsWorkspace({ refreshToken }: { refreshToken: number }) {
 
   async function requestManualCheck(id: number) {
     setManualBusy(true);
-    setManualError(null);
     try {
       const response = await fetch(`/api/monitors/${id}/checks`, {
         method: "POST",
@@ -204,8 +199,9 @@ export function MonitorsWorkspace({ refreshToken }: { refreshToken: number }) {
             : item,
         ),
       );
+      onManualCheckResult(true);
     } catch {
-      setManualError("Не удалось выполнить Ручную проверку.");
+      onManualCheckResult(false);
     } finally {
       setManualBusy(false);
     }

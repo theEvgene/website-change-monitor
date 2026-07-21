@@ -49,11 +49,13 @@ describe("Notifications UI", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
     const second = { ...replay, id: 3, checkId: 12, chainCheckId: 12, dedupeKey: "change:12", body: "Новое событие" };
     FakeEventSource.latest.emit(second); FakeEventSource.latest.emit(second);
-    expect(await screen.findByRole("status")).toHaveTextContent("Новое событие");
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(await screen.findByText("Новое событие")).toBeVisible();
     expect(screen.getAllByRole("row")).toHaveLength(4);
     const control = { ...second, id: 4, kind: "control_check_ok", centerVisible: false, checkId: 13, chainCheckId: 13, dedupeKey: "control:13", title: "Проверка завершена без изменений", body: "Изменений не обнаружено" };
     FakeEventSource.latest.emit(control);
-    expect(await screen.findByRole("status")).toHaveTextContent("Изменений не обнаружено");
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.queryByText("Изменений не обнаружено")).not.toBeInTheDocument();
     expect(screen.getAllByRole("row")).toHaveLength(4);
     FakeEventSource.latest.emit({ ...second, telegram: { state: "temporary", failureReason: "Telegram недоступен." } }, "delivery");
     expect(await screen.findByText("Telegram недоступен.")).toBeVisible();

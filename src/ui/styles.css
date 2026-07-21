@@ -96,10 +96,8 @@ input {
 }
 
 .topbar h1,
-.status-panel h2,
 .component-card h3,
 .topbar p,
-.status-panel p,
 .component-card p {
   margin: 0;
 }
@@ -193,14 +191,6 @@ main {
 .status-dialog-title { display: flex; align-items: baseline; gap: 10px; }
 .settings-dialog { width: min(520px, 94vw); }
 .settings-option { justify-content: space-between; margin-top: 22px; padding: 14px 0; color: #1d2633; }
-
-.status-panel {
-  padding: clamp(26px, 4vw, 44px);
-  background: #ffffff;
-  border: 1px solid #dce2ea;
-  border-radius: 10px;
-  box-shadow: 0 14px 38px rgb(24 38 57 / 8%);
-}
 
 .preview-panel {
   padding: clamp(26px, 4vw, 44px);
@@ -405,6 +395,21 @@ main {
   border-radius: 8px;
 }
 
+.journal-toolbar { display: flex; justify-content: flex-end; margin-bottom: 12px; }
+.journal-filter { display: flex; align-items: center; gap: 8px; color: #526174; font-size: 14px; }
+.journal-filter select { min-height: 34px; padding: 5px 30px 5px 9px; color: #1f2937; background: #fff; border: 1px solid #cbd4df; border-radius: 6px; }
+.journal-actions { display: flex; align-items: center; gap: 10px; }
+.journal-recheck { display: inline-grid; place-items: center; width: 30px; height: 30px; padding: 0; color: #2257a8; font-size: 20px; background: #eef4fc; border: 1px solid #b7c9e4; border-radius: 50%; cursor: pointer; }
+.journal-recheck:disabled { cursor: wait; opacity: .55; }
+.button-spinner { width: 15px; height: 15px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: button-spin 700ms linear infinite; }
+.secondary-button .button-spinner { display: inline-block; margin-right: 8px; vertical-align: -2px; }
+@keyframes button-spin { to { transform: rotate(360deg); } }
+
+.operation-toast { position: fixed; z-index: 30; top: 82px; right: clamp(16px, 3vw, 40px); display: flex; align-items: center; gap: 16px; min-width: min(360px, calc(100vw - 32px)); max-width: 480px; padding: 14px 16px; color: #fff; font-weight: 700; border-radius: 8px; box-shadow: 0 16px 42px rgb(15 23 42 / 28%); }
+.operation-toast--success { background: #28723f; }
+.operation-toast--error { background: #a52727; }
+.operation-toast button { margin-left: auto; padding: 0; color: inherit; font-size: 22px; background: transparent; border: 0; cursor: pointer; }
+
 .monitors-toolbar {
   display: flex;
   align-items: center;
@@ -590,12 +595,6 @@ main {
   align-items: center;
   justify-content: space-between;
   margin-top: 10px;
-}
-
-.status-panel h2 {
-  font-size: clamp(25px, 3.2vw, 37px);
-  line-height: 1.16;
-  letter-spacing: -0.035em;
 }
 
 .muted {

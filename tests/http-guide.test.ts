@@ -132,8 +132,8 @@ describe("documented direct HTTP examples", () => {
       ? journalJson
       : (journalJson as { value: unknown[] }).value;
     expect(journal).toEqual(expect.arrayContaining([
-      expect.objectContaining({ monitorName: "Catalog", kind: "manual", result: "no_change" }),
-      expect.objectContaining({ monitorName: "Catalog", result: "baseline" }),
+      expect.objectContaining({ monitorName: "Catalog", url: "https://example.com/catalog", kind: "manual", result: "no_change" }),
+      expect.objectContaining({ monitorName: "Catalog", url: "https://example.com/catalog", result: "baseline" }),
     ]));
     expect(JSON.parse(comparisonResult)).toMatchObject({
       monitorName: "Catalog",

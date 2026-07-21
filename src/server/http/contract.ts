@@ -463,7 +463,7 @@ export const journalCheckSchemaV1 = {
   type: "object",
   additionalProperties: false,
   required: [
-    "id", "monitorId", "monitorName", "kind", "status", "result",
+    "id", "monitorId", "monitorName", "url", "kind", "status", "result",
     "startedAt", "completedAt", "errorCode", "errorMessage",
     "beforeSnapshotId", "afterSnapshotId",
     "isFinalError",
@@ -473,6 +473,7 @@ export const journalCheckSchemaV1 = {
     id: checkProperties.id,
     monitorId: { type: "integer", minimum: 1 },
     monitorName: { type: "string" },
+    url: { type: "string", format: "uri" },
     kind: checkProperties.kind,
     status: checkProperties.status,
     result: checkProperties.result,

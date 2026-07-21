@@ -129,6 +129,7 @@ export interface JournalCheckRecord {
   id: number;
   monitorId: number;
   monitorName: string;
+  url: string;
   kind: CheckIntentKind;
   status: CheckStatus;
   result: CheckResult | null;
@@ -345,8 +346,8 @@ export function createMonitorStore(
   `);
   const insertCheck = database.prepare(`
     INSERT INTO checks (
-      monitor_id, scope_revision, intent_id, kind, status, started_at
-    ) VALUES (?, ?, ?, ?, 'running', ?)
+      monitor_id, scope_revision, intent_id, kind, status, started_at, url
+    ) VALUES (?, ?, ?, ?, 'running', ?, ?)
   `);
   const selectMonitorForCheck = database.prepare(`
     SELECT id, name, url, scope_revision, interval_hours, current_snapshot_id
@@ -386,13 +387,6 @@ export function createMonitorStore(
     if (markIntentRunning.run(now, intent.id).changes !== 1) {
       return undefined;
     }
-    const check = insertCheck.run(
-      intent.monitor_id,
-      intent.scope_revision,
-      intent.id,
-      intent.kind,
-      now,
-    );
     const monitor = selectMonitorForCheck.get(intent.monitor_id) as {
       id: number;
       name: string;
@@ -401,6 +395,14 @@ export function createMonitorStore(
       interval_hours: 6 | 12 | 24 | 48 | 72;
       current_snapshot_id: number | null;
     };
+    const check = insertCheck.run(
+      intent.monitor_id,
+      intent.scope_revision,
+      intent.id,
+      intent.kind,
+      now,
+      monitor.url,
+    );
     const snapshot =
       monitor.current_snapshot_id === null
         ? undefined
@@ -936,7 +938,7 @@ export function createMonitorStore(
     listJournal() {
       const rows = database
         .prepare(`
-          SELECT c.id, c.monitor_id, m.name monitor_name, c.kind, c.status,
+          SELECT c.id, c.monitor_id, m.name monitor_name, c.url, c.kind, c.status,
                  c.result, c.started_at, c.completed_at, c.error_code,
                  c.error_message, c.before_snapshot_id, c.after_snapshot_id,
                  c.is_final_error, d.state telegram_state, d.failure_reason telegram_failure_reason
@@ -950,6 +952,7 @@ export function createMonitorStore(
         id: number;
         monitor_id: number;
         monitor_name: string;
+        url: string;
         kind: CheckIntentKind;
         status: CheckStatus;
         result: CheckResult | null;
@@ -967,6 +970,7 @@ export function createMonitorStore(
         id: row.id,
         monitorId: row.monitor_id,
         monitorName: row.monitor_name,
+        url: row.url,
         kind: row.kind,
         status: row.status,
         result: row.result,

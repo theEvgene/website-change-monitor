@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import BetterSqlite3 from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -49,6 +50,29 @@ describe("durable Check scheduling", () => {
     selectedKinds.push(automatic.kind);
 
     expect(selectedKinds).toEqual(["manual", "manual", "manual", "retry"]);
+  });
+
+  it("keeps the URL captured by a Check when the Monitor URL later changes", async () => {
+    const { database } = await fixture();
+    createMonitor(database, "Catalog");
+    const claimed = database.monitors.claimNextCheck(at(0))!;
+
+    const direct = new BetterSqlite3(database.path);
+    try {
+      direct.prepare("UPDATE monitors SET url = ? WHERE id = ?").run(
+        "https://example.com/new-catalog",
+        claimed.monitorId,
+      );
+    } finally {
+      direct.close();
+    }
+
+    expect(database.monitors.listJournal()).toContainEqual(
+      expect.objectContaining({
+        id: claimed.checkId,
+        url: "https://example.com/Catalog",
+      }),
+    );
   });
 
   async function fixture() {

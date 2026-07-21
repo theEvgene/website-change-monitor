@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import { normalizeLabel, normalizeLabelKey } from "../domain/label.js";
 import type {
   ApplicationDatabase,
 } from "../persistence/database.js";
@@ -88,6 +89,7 @@ export interface MonitorService {
   deleteMonitor(id: number, confirmName: string): boolean | undefined;
   requestManualCheck(id: number): Promise<MonitorView | undefined>;
   listMonitors(label?: string): MonitorSummary[];
+  listLabels(): string[];
   listJournal(): JournalCheckRecord[];
   listActiveIntents(): CheckIntentRecord[];
   listNotifications(afterId?: number): NotificationFeed;
@@ -287,6 +289,7 @@ export function createMonitorService(options: {
       return options.database.monitors.getMonitor(id);
     },
     listMonitors: (label) => options.database.monitors.listMonitors(label),
+    listLabels: () => options.database.monitors.listLabels(),
     listJournal: () => options.database.monitors.listJournal(),
     listActiveIntents: () => options.database.monitors.listActiveIntents(),
     listNotifications: (afterId) => options.database.monitors.listNotifications(afterId),
@@ -392,9 +395,9 @@ function normalizeLabels(labels: string[]): string[] {
   const result: string[] = [];
   const seen = new Set<string>();
   for (const value of labels) {
-    const label = value.trim().normalize("NFC");
+    const label = normalizeLabel(value);
     if (label === "") continue;
-    const key = label.toUpperCase().toLowerCase();
+    const key = normalizeLabelKey(label);
     if (!seen.has(key)) { seen.add(key); result.push(label); }
   }
   return result;

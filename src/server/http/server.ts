@@ -35,6 +35,7 @@ import {
   listJournalRouteSchema,
   listCheckIntentsRouteSchema,
   listMonitorsRouteSchema,
+  listLabelsRouteSchema,
   listNotificationsRouteSchema,
   streamNotificationsRouteSchema,
   telegramStateSchemaV1,
@@ -49,6 +50,7 @@ import {
   monitorDeleteRequestSchemaV1,
   monitorDetailSchemaV1,
   monitorListResponseSchemaV1,
+  labelListResponseSchemaV1,
   monitorSummarySchemaV1,
   journalCheckSchemaV1,
   journalResponseSchemaV1,
@@ -201,6 +203,7 @@ export function buildHttpServer(
     apiServer.addSchema(monitorCheckSchemaV1);
     apiServer.addSchema(monitorSummarySchemaV1);
     apiServer.addSchema(monitorListResponseSchemaV1);
+    apiServer.addSchema(labelListResponseSchemaV1);
     apiServer.addSchema(monitorDetailSchemaV1);
     apiServer.addSchema(monitorCheckListResponseSchemaV1);
     apiServer.addSchema(journalCheckSchemaV1);
@@ -330,6 +333,12 @@ export function buildHttpServer(
       "/api/monitors",
       { schema: listMonitorsRouteSchema },
       async (request) => monitors.listMonitors(request.query.label),
+    );
+
+    apiServer.get(
+      "/api/labels",
+      { schema: listLabelsRouteSchema },
+      async () => monitors.listLabels(),
     );
 
     apiServer.put<{ Params: { monitorId: number }; Body: UpdateMonitorInput }>(

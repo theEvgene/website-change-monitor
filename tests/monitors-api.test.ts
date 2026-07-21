@@ -268,10 +268,12 @@ describe("Monitors HTTP API", () => {
     const create = async (name: string, labels: string[]) => (await server.inject({ method: "POST", url: "/api/monitors", headers: { host: "127.0.0.1:43117" }, payload: { name, url: "https://example.com/a", targetSelectors: [".a", ".b"], exclusionSelectors: [".noise"], intervalHours: 12, labels } })).json();
     const first = await create("First", ["work", "shared", "Новости", "Straße"]);
     const second = await create("Second", ["shared", "новости", "STRASSE"]);
+    expect((await server.inject({ method: "GET", url: "/api/labels", headers: { host: "127.0.0.1:43117" } })).json()).toEqual(["shared", "Straße", "work", "Новости"]);
 
     const reorganized = await server.inject({ method: "PUT", url: `/api/monitors/${first.id}`, headers: { host: "127.0.0.1:43117" }, payload: { name: "Renamed", url: first.url, targetSelectors: [".b", ".a"], exclusionSelectors: [".noise"], intervalHours: 24, labels: ["shared", "important", "Новости", "Straße"] } });
     expect(reorganized.statusCode).toBe(200);
     expect(reorganized.json()).toMatchObject({ name: "Renamed", scopeRevision: 1, targetSelectors: [".b", ".a"], labels: ["important", "shared", "Straße", "Новости"], history: first.history });
+    expect((await server.inject({ method: "GET", url: "/api/labels", headers: { host: "127.0.0.1:43117" } })).json()).toEqual(["important", "shared", "Straße", "Новости"]);
 
     const filtered = await server.inject({ method: "GET", url: "/api/monitors?label=important", headers: { host: "127.0.0.1:43117" } });
     expect(filtered.json()).toEqual([expect.objectContaining({ id: first.id })]);
@@ -292,6 +294,9 @@ describe("Monitors HTTP API", () => {
     expect((await server.inject({ method: "DELETE", url: `/api/monitors/${first.id}`, headers: { host: "127.0.0.1:43117" }, payload: { confirmName: "Renamed" } })).statusCode).toBe(204);
     const shared = await server.inject({ method: "GET", url: "/api/monitors?label=shared", headers: { host: "127.0.0.1:43117" } });
     expect(shared.json()).toEqual([expect.objectContaining({ id: second.id })]);
+    expect((await server.inject({ method: "GET", url: "/api/labels", headers: { host: "127.0.0.1:43117" } })).json()).toEqual(["shared", "Straße", "Новости"]);
+    expect((await server.inject({ method: "DELETE", url: `/api/monitors/${second.id}`, headers: { host: "127.0.0.1:43117" }, payload: { confirmName: "Second" } })).statusCode).toBe(204);
+    expect((await server.inject({ method: "GET", url: "/api/labels", headers: { host: "127.0.0.1:43117" } })).json()).toEqual([]);
     const journal = await server.inject({ method: "GET", url: "/api/checks", headers: { host: "127.0.0.1:43117" } });
     expect(journal.json()).not.toEqual(expect.arrayContaining([expect.objectContaining({ monitorId: first.id })]));
   });

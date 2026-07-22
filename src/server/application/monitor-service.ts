@@ -21,6 +21,7 @@ import {
 } from "./preview-page.js";
 import {
   compareSnapshots,
+  sameSnapshotContent,
   type SnapshotComparison,
 } from "./snapshot-comparison.js";
 
@@ -188,17 +189,7 @@ export function createMonitorService(options: {
             nextCheckAt,
           );
         } else {
-          if (claimed.currentSnapshot.formatVersion !== snapshot.formatVersion) {
-            throw new SnapshotError(
-              "snapshot_invalid",
-              "Версия сохранённого Снимка не поддерживается.",
-            );
-          }
-          if (
-            Buffer.from(claimed.currentSnapshot.canonicalJson, "utf8").equals(
-              Buffer.from(snapshot.canonicalJson, "utf8"),
-            )
-          ) {
+          if (sameSnapshotContent(claimed.currentSnapshot.canonicalJson, snapshot.canonicalJson)) {
             await prepareNotification();
             options.database.monitors.completeNoChange(
               claimed,
@@ -430,6 +421,7 @@ function createSnapshot(preview: PagePreview): {
     }
     validateElementTree(target.elements);
     const visibleText = normalizeText(target.visibleText);
+    const links = normalizeLinks(target.links ?? [], visibleText);
     textLineCount += visibleText === "" ? 0 : 1 + countNewlines(visibleText);
     if (textLineCount > snapshotLimits.textLines) {
       throw tooLarge();
@@ -447,6 +439,7 @@ function createSnapshot(preview: PagePreview): {
         };
       }),
       visibleText,
+      ...(links.length === 0 ? {} : { links }),
     };
   });
   const canonicalJson = canonicalize({ formatVersion: 1, targets });
@@ -459,6 +452,17 @@ function createSnapshot(preview: PagePreview): {
     canonicalJson,
     sha256: createHash("sha256").update(bytes).digest("hex"),
   };
+}
+
+function normalizeLinks(links: PagePreview["targets"][number]["links"], visibleText: string): Array<{ start: number; end: number; href: string }> {
+  return (links ?? []).filter((link) => {
+    if (!Number.isSafeInteger(link.start) || !Number.isSafeInteger(link.end) || link.start < 0 || link.end > visibleText.length || link.end <= link.start) return false;
+    try {
+      const url = new URL(link.href);
+      if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+    } catch { return false; }
+    return true;
+  }).map((link) => ({ start: link.start, end: link.end, href: link.href }));
 }
 
 function validateElementTree(

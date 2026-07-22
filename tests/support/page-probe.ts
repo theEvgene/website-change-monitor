@@ -23,6 +23,7 @@ export function successfulPageProbeResult(
       childElementCount: number;
     }>;
     visibleText: string;
+    links?: Array<{ start: number; end: number; href: string }>;
   }> = [],
 ): PageProbeResult {
   return {

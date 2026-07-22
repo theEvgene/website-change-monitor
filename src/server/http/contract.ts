@@ -206,6 +206,14 @@ export const previewResponseSchemaV1 = {
             },
           },
           visibleText: { type: "string" },
+          links: {
+            type: "array",
+            items: {
+              type: "object", additionalProperties: false,
+              required: ["start", "end", "href"],
+              properties: { start: { type: "integer", minimum: 0 }, end: { type: "integer", minimum: 1 }, href: { type: "string", format: "uri" } },
+            },
+          },
         },
       },
     },
@@ -518,6 +526,8 @@ const diffRowSchema = {
     after: { type: ["string", "null"] },
     omittedBefore: { type: "integer", minimum: 0 },
     omittedAfter: { type: "integer", minimum: 0 },
+    beforeLinks: { type: "array", items: { type: "object", additionalProperties: false, required: ["start", "end", "href"], properties: { start: { type: "integer", minimum: 0 }, end: { type: "integer", minimum: 1 }, href: { type: "string", format: "uri" } } } },
+    afterLinks: { type: "array", items: { type: "object", additionalProperties: false, required: ["start", "end", "href"], properties: { start: { type: "integer", minimum: 0 }, end: { type: "integer", minimum: 1 }, href: { type: "string", format: "uri" } } } },
   },
 } as const;
 

@@ -22,6 +22,17 @@ export type DiffRow =
       omittedAfter: number;
     };
 
+export type TextDiffRow = DiffRow & {
+  beforeLinks?: TextLink[];
+  afterLinks?: TextLink[];
+};
+
+export interface TextLink {
+  start: number;
+  end: number;
+  href: string;
+}
+
 interface Edit {
   kind: "equal" | "delete" | "insert";
   value: string;
@@ -222,6 +233,7 @@ interface SnapshotElement {
 interface SnapshotTarget {
   elements: SnapshotElement[];
   visibleText: string;
+  links?: TextLink[];
 }
 
 interface SnapshotDocument {
@@ -232,7 +244,7 @@ interface SnapshotDocument {
 export interface TargetComparison {
   kind: "equal" | "replace" | "delete" | "insert";
   structure: DiffRow[];
-  text: DiffRow[];
+  text: TextDiffRow[];
 }
 
 export interface SnapshotComparison {
@@ -267,10 +279,7 @@ export function compareSnapshots(
       beforeTarget === undefined ? [] : structureLines(beforeTarget.elements),
       afterTarget === undefined ? [] : structureLines(afterTarget.elements),
     );
-    const text = diffLines(
-      beforeTarget === undefined ? [] : textLines(beforeTarget.visibleText),
-      afterTarget === undefined ? [] : textLines(afterTarget.visibleText),
-    );
+    const text = diffTextLines(beforeTarget, afterTarget);
     if (
       structure.some((item) => item.kind === "omitted") ||
       text.some((item) => item.kind === "omitted")
@@ -280,6 +289,46 @@ export function compareSnapshots(
     targets.push({ kind: row.kind, structure, text });
   }
   return { complete, targets };
+}
+
+export function sameSnapshotContent(beforeJson: string, afterJson: string): boolean {
+  const before = parseSnapshot(beforeJson);
+  const after = parseSnapshot(afterJson);
+  return JSON.stringify(before.targets.map(contentTarget)) === JSON.stringify(after.targets.map(contentTarget));
+}
+
+function contentTarget(target: SnapshotTarget) {
+  return { elements: target.elements, visibleText: target.visibleText };
+}
+
+function diffTextLines(beforeTarget: SnapshotTarget | undefined, afterTarget: SnapshotTarget | undefined): TextDiffRow[] {
+  const beforeLines = beforeTarget === undefined ? [] : textLines(beforeTarget.visibleText);
+  const afterLines = afterTarget === undefined ? [] : textLines(afterTarget.visibleText);
+  const beforeLinks = linksByLine(beforeTarget);
+  const afterLinks = linksByLine(afterTarget);
+  let beforeIndex = 0;
+  let afterIndex = 0;
+  return diffLines(beforeLines, afterLines).map((row) => {
+    const beforeRowLinks = row.before === null ? undefined : beforeLinks[beforeIndex++];
+    const afterRowLinks = row.after === null ? undefined : afterLinks[afterIndex++];
+    return { ...row, ...(beforeRowLinks === undefined || beforeRowLinks.length === 0 ? {} : { beforeLinks: beforeRowLinks }), ...(afterRowLinks === undefined || afterRowLinks.length === 0 ? {} : { afterLinks: afterRowLinks }) };
+  });
+}
+
+function linksByLine(target: SnapshotTarget | undefined): TextLink[][] {
+  if (target === undefined) return [];
+  const lines = textLines(target.visibleText);
+  const output = lines.map((): TextLink[] => []);
+  let lineStart = 0;
+  for (const [lineIndex, line] of lines.entries()) {
+    const lineEnd = lineStart + line.length;
+    for (const link of target.links ?? []) {
+      if (!isSafeHref(link.href) || link.end <= lineStart || link.start >= lineEnd) continue;
+      output[lineIndex]!.push({ start: Math.max(link.start, lineStart) - lineStart, end: Math.min(link.end, lineEnd) - lineStart, href: link.href });
+    }
+    lineStart = lineEnd + 1;
+  }
+  return output;
 }
 
 function structureLines(elements: SnapshotElement[]): string[] {
@@ -309,8 +358,15 @@ function parseSnapshot(value: string): SnapshotDocument {
 
 function parseTarget(value: string): SnapshotTarget {
   const parsed = JSON.parse(value) as SnapshotTarget;
-  if (!Array.isArray(parsed.elements) || typeof parsed.visibleText !== "string") {
+  if (!Array.isArray(parsed.elements) || typeof parsed.visibleText !== "string" || (parsed.links !== undefined && !Array.isArray(parsed.links))) {
     throw new Error("Snapshot target is malformed");
   }
   return parsed;
+}
+
+function isSafeHref(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch { return false; }
 }

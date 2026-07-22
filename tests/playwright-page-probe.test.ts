@@ -46,6 +46,17 @@ describe("Playwright PageProbe", () => {
           </main>`);
         return;
       }
+      if (request.url === "/links") {
+        response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        response.end(`<!doctype html><base href="/base/"><main>
+          <a href="openings/42"><div class="linked-title">Linked role</div></a>
+          <a href="javascript:alert(1)"><div class="unsafe-title">Unsafe role</div></a>
+          <div class="repeated-links"><span>Apply</span><br><a href="/first">Apply</a><br><a href="/second">Apply</a></div>
+          <div class="same-line-links"><a href="/first">First</a> <a href="/second">Second</a></div>
+          <div class="unicode-link">e\u0301<a href="/job">Job</a></div>
+        </main>`);
+        return;
+      }
       if (request.url === "/budget") {
         response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
         response.end(`<!doctype html>
@@ -291,6 +302,76 @@ describe("Playwright PageProbe", () => {
     expect(reordered).toMatchObject(
       first.ok ? { ok: true, preview: { targets: first.preview.targets } } : {},
     );
+  });
+
+  it("captures resolved safe links for text inside a parent anchor", async () => {
+    const probe = createPlaywrightPageProbe(browser, {
+      networkAccess: fixtureNetworkAccess(),
+      timings: fastTimings(),
+    });
+
+    await expect(probe.preview({
+      url: `${fixtureUrl}/links`,
+      targetSelectors: [".linked-title", ".unsafe-title"],
+      exclusionSelectors: [],
+    })).resolves.toMatchObject({
+      ok: true,
+      preview: {
+        targets: [
+          { visibleText: "Linked role", links: [{ start: 0, end: 11, href: `${fixtureUrl}/base/openings/42` }] },
+          { visibleText: "Unsafe role", links: [] },
+        ],
+      },
+    });
+  });
+
+  it("keeps separate destinations for repeated link text", async () => {
+    const probe = createPlaywrightPageProbe(browser, { networkAccess: fixtureNetworkAccess(), timings: fastTimings() });
+
+    await expect(probe.preview({
+      url: `${fixtureUrl}/links`, targetSelectors: [".repeated-links"], exclusionSelectors: [],
+    })).resolves.toMatchObject({
+      ok: true,
+      preview: {
+        targets: [{
+          visibleText: "Apply\nApply\nApply",
+          links: [
+            { start: 6, end: 11, href: `${fixtureUrl}/first` },
+            { start: 12, end: 17, href: `${fixtureUrl}/second` },
+          ],
+        }],
+      },
+    });
+  });
+
+  it("keeps each destination when multiple links share a rendered line", async () => {
+    const probe = createPlaywrightPageProbe(browser, { networkAccess: fixtureNetworkAccess(), timings: fastTimings() });
+
+    await expect(probe.preview({
+      url: `${fixtureUrl}/links`, targetSelectors: [".same-line-links"], exclusionSelectors: [],
+    })).resolves.toMatchObject({
+      ok: true,
+      preview: {
+        targets: [{
+          visibleText: "First Second",
+          links: [
+            { start: 0, end: 5, href: `${fixtureUrl}/first` },
+            { start: 6, end: 12, href: `${fixtureUrl}/second` },
+          ],
+        }],
+      },
+    });
+  });
+
+  it("keeps link ranges aligned after snapshot Unicode normalization", async () => {
+    const probe = createPlaywrightPageProbe(browser, { networkAccess: fixtureNetworkAccess(), timings: fastTimings() });
+
+    await expect(probe.preview({
+      url: `${fixtureUrl}/links`, targetSelectors: [".unicode-link"], exclusionSelectors: [],
+    })).resolves.toMatchObject({
+      ok: true,
+      preview: { targets: [{ visibleText: "éJob", links: [{ start: 1, end: 4, href: `${fixtureUrl}/job` }] }] },
+    });
   });
 
   it("identifies the target selector that has no matches", async () => {

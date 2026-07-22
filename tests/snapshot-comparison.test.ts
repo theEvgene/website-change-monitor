@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   compareSnapshots,
   diffLines,
+  sameSnapshotContent,
   type DiffRow,
 } from "../src/server/application/snapshot-comparison.js";
 
@@ -86,5 +87,45 @@ describe("deterministic Snapshot Comparison", () => {
         },
       ],
     });
+  });
+
+  it("preserves safe links as text metadata without treating a destination-only change as content", () => {
+    const before = JSON.stringify({
+      formatVersion: 1,
+      targets: [{ elements: [{ namespace: "html", name: "a", childElementCount: 0 }], visibleText: "Old role", links: [{ start: 0, end: 8, href: "https://example.com/old" }] }],
+    });
+    const after = JSON.stringify({
+      formatVersion: 1,
+      targets: [{ elements: [{ namespace: "html", name: "a", childElementCount: 0 }], visibleText: "New role", links: [{ start: 0, end: 8, href: "https://example.com/new" }] }],
+    });
+    const destinationOnlyChange = JSON.stringify({
+      formatVersion: 1,
+      targets: [{ elements: [{ namespace: "html", name: "a", childElementCount: 0 }], visibleText: "Old role", links: [{ start: 0, end: 8, href: "https://example.com/replaced" }] }],
+    });
+
+    expect(sameSnapshotContent(before, destinationOnlyChange)).toBe(true);
+    expect(compareSnapshots(before, after).targets[0]?.text).toEqual([
+      { kind: "replace", before: "Old role", after: "New role", beforeLinks: [{ start: 0, end: 8, href: "https://example.com/old" }], afterLinks: [{ start: 0, end: 8, href: "https://example.com/new" }] },
+    ]);
+  });
+
+  it("keeps multiple clickable fragments on one comparison line", () => {
+    const snapshot = JSON.stringify({
+      formatVersion: 1,
+      targets: [{ elements: [{ namespace: "html", name: "div", childElementCount: 0 }], visibleText: "First Second", links: [
+        { start: 0, end: 5, href: "https://example.com/first" },
+        { start: 6, end: 12, href: "https://example.com/second" },
+      ] }],
+    });
+
+    expect(compareSnapshots(snapshot, snapshot).targets[0]?.text).toEqual([
+      { kind: "equal", before: "First Second", after: "First Second", beforeLinks: [
+        { start: 0, end: 5, href: "https://example.com/first" },
+        { start: 6, end: 12, href: "https://example.com/second" },
+      ], afterLinks: [
+        { start: 0, end: 5, href: "https://example.com/first" },
+        { start: 6, end: 12, href: "https://example.com/second" },
+      ] },
+    ]);
   });
 });

@@ -4,7 +4,11 @@ export interface DiffRow {
   after: string | null;
   omittedBefore?: number;
   omittedAfter?: number;
+  beforeLinks?: TextLink[];
+  afterLinks?: TextLink[];
 }
+
+interface TextLink { start: number; end: number; href: string }
 
 export interface ComparisonResponse {
   checkId: number;
@@ -75,8 +79,22 @@ function DiffRowView({ row }: { row: DiffRow }) {
     </div>
   ) : (
     <div className={`diff-row diff-row--${row.kind}`}>
-      <pre className={row.kind === "replace" || row.kind === "delete" ? "diff-before" : undefined}>{row.before ?? ""}</pre>
-      <pre className={row.kind === "replace" || row.kind === "insert" ? "diff-after" : undefined}>{row.after ?? ""}</pre>
+      <pre className={row.kind === "replace" || row.kind === "delete" ? "diff-before" : undefined}>{renderText(row.before ?? "", row.beforeLinks)}</pre>
+      <pre className={row.kind === "replace" || row.kind === "insert" ? "diff-after" : undefined}>{renderText(row.after ?? "", row.afterLinks)}</pre>
     </div>
   );
+}
+
+function renderText(value: string, links: TextLink[] | undefined) {
+  if (links === undefined || links.length === 0) return value;
+  const fragments: React.ReactNode[] = [];
+  let offset = 0;
+  for (const link of links) {
+    if (link.start < offset || link.end > value.length || link.end <= link.start) continue;
+    if (link.start > offset) fragments.push(value.slice(offset, link.start));
+    fragments.push(<a href={link.href} key={`${link.start}-${link.end}-${link.href}`} target="_blank" rel="noopener noreferrer">{value.slice(link.start, link.end)}</a>);
+    offset = link.end;
+  }
+  if (offset < value.length) fragments.push(value.slice(offset));
+  return fragments;
 }

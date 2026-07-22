@@ -78,6 +78,13 @@ export interface PagePreviewElement {
 export interface PagePreviewTarget {
   elements: PagePreviewElement[];
   visibleText: string;
+  links?: PagePreviewLink[];
+}
+
+export interface PagePreviewLink {
+  start: number;
+  end: number;
+  href: string;
 }
 
 export interface PageProbeSuccess {

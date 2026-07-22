@@ -605,14 +605,15 @@ async function extractObservationScope(
 
         let elementRecordCount = 0;
         let visibleTextCharacterCount = 0;
-        const extractedTargets: Array<{
-          elements: Array<{
-            namespace: string | null;
-            name: string;
-            childElementCount: number;
-          }>;
-          visibleText: string;
-        }> = [];
+          const extractedTargets: Array<{
+            elements: Array<{
+              namespace: string | null;
+              name: string;
+              childElementCount: number;
+            }>;
+            visibleText: string;
+            links: Array<{ start: number; end: number; href: string }>;
+          }> = [];
         for (const target of targets) {
           const targetResult = extractTarget(target);
           if (typeof targetResult === "string") {
@@ -648,8 +649,9 @@ async function extractObservationScope(
               style.visibility !== "hidden" &&
               box.width > 0 &&
               box.height > 0;
-            const visibleText =
-              rendered && target instanceof HTMLElement ? target.innerText : "";
+            const visibleText = normalizeSnapshotText(
+              rendered && target instanceof HTMLElement ? target.innerText : "",
+            );
             visibleTextCharacterCount += visibleText.length;
             if (
               visibleTextCharacterCount > limits.maxVisibleTextCharacters
@@ -664,7 +666,7 @@ async function extractObservationScope(
             if (!visitElement(target, target, excluded, elements)) {
               return "elements" as const;
             }
-            return { elements, visibleText };
+            return { elements, visibleText, links: extractLinks(target, excluded) };
           } finally {
             for (const { element, value, priority } of displays) {
               if (value === "") {
@@ -673,6 +675,69 @@ async function extractObservationScope(
                 element.style.setProperty("display", value, priority);
               }
             }
+          }
+        }
+
+        function extractLinks(target: Element, excluded: Set<Element>) {
+          const candidates: HTMLAnchorElement[] = [];
+          const containingAnchor = target.closest("a[href]");
+          if (containingAnchor instanceof HTMLAnchorElement && !excluded.has(containingAnchor)) {
+            candidates.push(containingAnchor);
+          }
+          for (const anchor of target.querySelectorAll("a[href]")) {
+            if (anchor instanceof HTMLAnchorElement && !excluded.has(anchor)) {
+              candidates.push(anchor);
+            }
+          }
+
+          const markers = candidates.map((anchor, index) => {
+            const startText = `\u2060${"\u200C".repeat(index)}\u200B`;
+            const endText = `\u2060${"\u200C".repeat(index)}\u200D`;
+            const start = document.createTextNode(startText);
+            const end = document.createTextNode(endText);
+            const insertionPoint = anchor.contains(target) ? target : anchor;
+            insertionPoint.prepend(start);
+            insertionPoint.append(end);
+            return { anchor, start, end, startText, endText };
+          });
+
+          try {
+            const markedText = target instanceof HTMLElement ? target.innerText : "";
+            const markerTexts = markers.flatMap(({ startText, endText }) => [startText, endText]);
+            const links: Array<{ start: number; end: number; href: string }> = [];
+            for (const { anchor, startText, endText } of markers) {
+              const href = safeHref(anchor.href);
+              const start = offsetBeforeMarker(markedText, startText, markerTexts);
+              const end = offsetBeforeMarker(markedText, endText, markerTexts);
+              if (href !== null && start >= 0 && end > start) links.push({ start, end, href });
+            }
+            return links.sort((left, right) => left.start - right.start || left.end - right.end);
+          } finally {
+            for (const { start, end } of markers) {
+              start.remove();
+              end.remove();
+            }
+          }
+        }
+
+        function offsetBeforeMarker(value: string, marker: string, allMarkers: string[]) {
+          const position = value.indexOf(marker);
+          if (position < 0) return -1;
+          let prefix = value.slice(0, position);
+          for (const candidate of allMarkers) prefix = prefix.replaceAll(candidate, "");
+          return normalizeSnapshotText(prefix).length;
+        }
+
+        function normalizeSnapshotText(value: string) {
+          return value.replace(/\r\n?|\u2028|\u2029/g, "\n").normalize("NFC");
+        }
+
+        function safeHref(value: string) {
+          try {
+            const url = new URL(value);
+            return url.protocol === "http:" || url.protocol === "https:" ? url.href : null;
+          } catch {
+            return null;
           }
         }
 

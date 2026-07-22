@@ -237,6 +237,30 @@ describe("Monitor use case", () => {
     expect(preview).toHaveBeenCalledTimes(4);
   });
 
+  it("does not treat a link destination-only change as a Change", async () => {
+    const root = await mkdtemp(join(tmpdir(), "website-change-monitor-"));
+    roots.push(root);
+    const database = openApplicationDatabase({ rootDirectory: root });
+    databases.push(database);
+    const observed = (href: string) => successfulPageProbeResult(
+      "https://example.com/catalog",
+      [{ selector: ".card", matchCount: 1 }],
+      [{ elements: [{ namespace: "http://www.w3.org/1999/xhtml", name: "div", childElementCount: 0 }], visibleText: "Product", links: [{ start: 0, end: 7, href }] }],
+    );
+    const preview = vi.fn<PageProbe["preview"]>()
+      .mockResolvedValueOnce(observed("https://example.com/products/one"))
+      .mockResolvedValueOnce(observed("https://example.com/products/one"))
+      .mockResolvedValueOnce(observed("https://example.com/products/two"));
+    let now = new Date("2026-07-17T08:00:00.000Z");
+    const service = createMonitorService({ database, pageProbe: { preview }, clock: { now: () => now } });
+    const created = await service.createMonitor({ name: "Catalog", url: "https://example.com/catalog", targetSelectors: [".card"], exclusionSelectors: [], intervalHours: 6 });
+
+    now = new Date("2026-07-17T09:00:00.000Z");
+    const checked = await service.requestManualCheck(created.id);
+
+    expect(checked?.history[0]).toMatchObject({ kind: "manual", result: "no_change", beforeSnapshotId: 1, afterSnapshotId: 1, snapshot: null });
+  });
+
   it.each([
     ["addition", ["A", "B", "C"]],
     ["deletion", ["A"]],

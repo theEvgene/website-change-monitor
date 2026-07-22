@@ -576,7 +576,7 @@ describe("startup UI", () => {
             kind: "replace",
             structure: [{ kind: "equal", before: "html:div", after: "html:div" }],
             text: [
-              { kind: "replace", before: "Old product", after: "New product" },
+              { kind: "replace", before: "Old product", after: "New product", beforeLinks: [{ start: 0, end: 11, href: "https://example.com/old-product" }], afterLinks: [{ start: 0, end: 11, href: "https://example.com/new-product" }] },
               { kind: "delete", before: "Removed product", after: null },
               { kind: "insert", before: null, after: "Added product" },
             ],
@@ -625,8 +625,10 @@ describe("startup UI", () => {
     fireEvent.click(comparisonButtons[0]!);
 
     const dialog = await screen.findByRole("dialog", { name: "Сравнение" });
-    expect(within(dialog).getByText("Old product")).toHaveClass("diff-before");
-    expect(within(dialog).getByText("New product")).toHaveClass("diff-after");
+    expect(within(dialog).getByText("Old product").closest("pre")).toHaveClass("diff-before");
+    expect(within(dialog).getByText("New product").closest("pre")).toHaveClass("diff-after");
+    expect(within(dialog).getByRole("link", { name: "Old product" })).toHaveAttribute("href", "https://example.com/old-product");
+    expect(within(dialog).getByRole("link", { name: "New product" })).toHaveAttribute("href", "https://example.com/new-product");
     const deletedRow = within(dialog).getByText("Removed product").closest(".diff-row");
     const insertedRow = within(dialog).getByText("Added product").closest(".diff-row");
     expect(deletedRow?.querySelectorAll("pre")[0]).toHaveClass("diff-before");

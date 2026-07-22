@@ -500,6 +500,7 @@ main {
 
 .diff-before { color: #7f1d1d; background: #fee2e2 !important; }
 .diff-after { color: #14532d; background: #dcfce7 !important; }
+.diff-row a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .diff-omitted,
 .comparison-limited {
   padding: 10px;

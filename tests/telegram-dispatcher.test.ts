@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import BetterSqlite3 from "better-sqlite3";
 
 import { createTelegramDispatcher } from "../src/server/notifications/telegram-dispatcher.js";
+import type { NdjsonLogger } from "../src/server/operations/logger.js";
 import { openApplicationDatabase, type ApplicationDatabase } from "../src/server/persistence/database.js";
 
 describe("Telegram dispatcher", () => {
@@ -41,6 +42,135 @@ describe("Telegram dispatcher", () => {
     expect([...captured.payload.message].length).toBeGreaterThan(3_000);
     expect(captured.payload.message).toContain(`Ссылка: https://example.com/${"x".repeat(3_100)}`);
     expect(captured.payload.message).not.toContain("secret");
+  });
+
+  it("logs missing comparison data and delivers the prebuilt base alert", async () => {
+    const fixture = await setup({});
+    const dispatcher = createTelegramDispatcher({
+      store: fixture.database.monitors,
+      executablePath: process.execPath,
+      argsPrefix: [fixture.script],
+      environment: fixture.environment,
+      logger: fixture.logger,
+      now: fixture.now,
+    });
+    await dispatcher.initialize();
+    seedChange(fixture.database, "Fallback");
+    const stateBeforeFallback = fallbackDomainState(fixture.database);
+    const inspection = new BetterSqlite3(fixture.database.path);
+    try {
+      inspection.pragma("foreign_keys = OFF");
+      inspection.prepare("DELETE FROM snapshots WHERE id = (SELECT after_snapshot_id FROM checks WHERE result = 'change' LIMIT 1)").run();
+    } finally {
+      inspection.close();
+    }
+
+    await dispatcher.drain();
+
+    const captured = JSON.parse(await readFile(fixture.capture, "utf8")) as { payload: { message: string } };
+    expect(captured.payload.message).toContain("URL: https://example.com/");
+    expect(captured.payload.message).not.toContain("Добавлено:");
+    expect(fallbackDomainState(fixture.database)).toEqual(stateBeforeFallback);
+    expect(fixture.database.monitors.listNotifications().items[0]!.telegram.state).toBe("delivered");
+    expect(fixture.events).toEqual([{
+      event: "telegram_change_details_failed",
+      values: {
+        deliveryId: expect.any(Number),
+        checkId: expect.any(Number),
+        stage: "comparison_data",
+        errorName: "ComparisonDataUnavailable",
+        errorMessage: "Change detail preparation failed.",
+      },
+    }]);
+  });
+
+  it("falls back at the comparison stage without logging Snapshot content", async () => {
+    const fixture = await setup({});
+    const dispatcher = createTelegramDispatcher({
+      store: fixture.database.monitors,
+      executablePath: process.execPath,
+      argsPrefix: [fixture.script],
+      environment: fixture.environment,
+      logger: fixture.logger,
+      now: fixture.now,
+    });
+    await dispatcher.initialize();
+    seedChange(fixture.database, "Broken comparison");
+    const stateBeforeFallback = fallbackDomainState(fixture.database);
+    const inspection = new BetterSqlite3(fixture.database.path);
+    try {
+      inspection.prepare("UPDATE snapshots SET canonical_json = ? WHERE id = (SELECT after_snapshot_id FROM checks WHERE result = 'change' LIMIT 1)")
+        .run(Buffer.from("private snapshot text", "utf8"));
+    } finally {
+      inspection.close();
+    }
+
+    await dispatcher.drain();
+
+    await expectBaseFallback(fixture, stateBeforeFallback);
+    expect(fixture.events[0]).toMatchObject({
+      event: "telegram_change_details_failed",
+      values: {
+        stage: "comparison",
+        errorName: expect.any(String),
+        errorMessage: "Change detail preparation failed.",
+      },
+    });
+    expect(JSON.stringify(fixture.events)).not.toContain("private snapshot text");
+  });
+
+  it.each(["projection", "formatting"] as const)(
+    "falls back when %s fails",
+    async (stage) => {
+      const fixture = await setup({});
+      const dispatcher = createTelegramDispatcher({
+        store: fixture.database.monitors,
+        executablePath: process.execPath,
+        argsPrefix: [fixture.script],
+        environment: fixture.environment,
+        logger: fixture.logger,
+        now: fixture.now,
+        detailPreparation: stage === "projection"
+          ? { project() { throw new TypeError("private fragment https://secret.example"); } }
+          : { format() { throw new RangeError("private final message"); } },
+      });
+      await dispatcher.initialize();
+      seedChange(fixture.database, `Broken ${stage}`);
+      const stateBeforeFallback = fallbackDomainState(fixture.database);
+
+      await dispatcher.drain();
+
+      await expectBaseFallback(fixture, stateBeforeFallback);
+      expect(fixture.events[0]).toMatchObject({
+        event: "telegram_change_details_failed",
+        values: {
+          stage,
+          errorName: stage === "projection" ? "TypeError" : "RangeError",
+          errorMessage: "Change detail preparation failed.",
+        },
+      });
+      expect(JSON.stringify(fixture.events)).not.toMatch(/private|https:/u);
+    },
+  );
+
+  it("delivers the base alert even when failure logging throws", async () => {
+    const fixture = await setup({});
+    const dispatcher = createTelegramDispatcher({
+      store: fixture.database.monitors,
+      executablePath: process.execPath,
+      argsPrefix: [fixture.script],
+      environment: fixture.environment,
+      logger: { write() { throw new Error("logger unavailable"); } },
+      now: fixture.now,
+      detailPreparation: { format() { throw new Error("formatting failed"); } },
+    });
+    await dispatcher.initialize();
+    seedChange(fixture.database, "Logger failure");
+    const stateBeforeFallback = fallbackDomainState(fixture.database);
+
+    await dispatcher.drain();
+
+    await expectBaseFallback(fixture, stateBeforeFallback);
   });
 
   it("stores bounded diagnostics with Telegram tokens redacted", async () => {
@@ -123,9 +253,40 @@ describe("Telegram dispatcher", () => {
     const capture = join(root, "capture.json"); const script = join(root, "fake-sender.mjs");
     await writeFile(script, `import fs from 'node:fs'; const command=process.argv[2]; if(command==='show-config') process.exit(process.env.FAKE_AVAILABLE==='0'?3:0); let input=''; process.stdin.setEncoding('utf8'); process.stdin.on('data',c=>input+=c); process.stdin.on('end',()=>setTimeout(()=>{fs.writeFileSync(process.env.FAKE_CAPTURE,JSON.stringify({payload:JSON.parse(input),utf8:process.env.PYTHONUTF8}));if(process.env.FAKE_STDERR)process.stderr.write(process.env.FAKE_STDERR);process.exit(Number(process.env.FAKE_EXIT||0));},Number(process.env.FAKE_DELAY||0)));`, "utf8");
     const database = openApplicationDatabase({ rootDirectory: root }); databases.push(database);
-    return { root, capture, script, database, environment: { ...process.env, FAKE_CAPTURE: capture, ...extra } };
+    const events: Array<{ event: string; values?: Record<string, unknown> }> = [];
+    const logger: NdjsonLogger = { write(event, values) { events.push({ event, ...(values === undefined ? {} : { values }) }); } };
+    const now = () => new Date("2026-07-18T08:00:00.000Z");
+    return { root, capture, script, database, environment: { ...process.env, FAKE_CAPTURE: capture, ...extra }, events, logger, now };
   }
 });
+
+async function expectBaseFallback(fixture: {
+  capture: string;
+  database: ApplicationDatabase;
+}, stateBeforeFallback: ReturnType<typeof fallbackDomainState>): Promise<void> {
+  const captured = JSON.parse(await readFile(fixture.capture, "utf8")) as { payload: { message: string } };
+  expect(captured.payload.message).toContain("URL: https://example.com/");
+  expect(captured.payload.message).not.toContain("Добавлено:");
+  expect(captured.payload.message).not.toContain("Удалено:");
+  expect(fallbackDomainState(fixture.database)).toEqual(stateBeforeFallback);
+  expect(fixture.database.monitors.listNotifications().items[0]!.telegram.state).toBe("delivered");
+}
+
+function fallbackDomainState(database: ApplicationDatabase) {
+  const event = database.monitors.listNotifications().items[0]!;
+  const { telegram: _telegram, ...notification } = event;
+  const check = database.monitors.getMonitor(event.monitorId)!.history
+    .find((candidate) => candidate.id === event.checkId)!;
+  return {
+    notification,
+    check: {
+      status: check.status,
+      result: check.result,
+      beforeSnapshotId: check.beforeSnapshotId,
+      afterSnapshotId: check.afterSnapshotId,
+    },
+  };
+}
 
 function seedChange(database: ApplicationDatabase, name: string, url = "https://example.com"): void {
   const now = "2026-07-18T08:00:00.000Z";

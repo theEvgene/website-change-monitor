@@ -22,17 +22,24 @@ describe("Telegram dispatcher", () => {
     expect(event.telegram.state).toBe(state);
     const captured = JSON.parse(await readFile(fixture.capture, "utf8")) as { payload: Record<string, unknown>; utf8: string };
     expect(Object.keys(captured.payload).sort()).toEqual(["message", "monitor_id", "observed_at", "status"]);
-    expect(captured.payload).toMatchObject({ monitor_id: "Каталог", status: "warning", message: expect.stringContaining("URL: https://example.com") });
+    expect(captured.payload).toMatchObject({
+      monitor_id: "Каталог",
+      status: "warning",
+      message: expect.stringContaining("➕ Добавлено:\n• New role"),
+    });
+    expect(captured.payload.message).toEqual(expect.stringContaining("➖ Удалено:\n• Old role"));
+    expect(captured.payload.message).toEqual(expect.stringContaining("Ссылка: https://example.com/"));
     expect(captured.utf8).toBe("1");
   });
 
-  it("limits user-controlled fields by code point and strips URL credentials", async () => {
+  it("limits the monitor id, preserves the source link, and strips URL credentials", async () => {
     const fixture = await setup({});
     const dispatcher = createTelegramDispatcher({ store: fixture.database.monitors, executablePath: process.execPath, argsPrefix: [fixture.script], environment: fixture.environment });
     await dispatcher.initialize(); seedChange(fixture.database, "😀".repeat(110), "https://user:secret@example.com/" + "x".repeat(3_100)); await dispatcher.drain();
     const captured = JSON.parse(await readFile(fixture.capture, "utf8")) as { payload: { monitor_id: string; message: string } };
     expect([...captured.payload.monitor_id]).toHaveLength(100);
-    expect([...captured.payload.message]).toHaveLength(3_000);
+    expect([...captured.payload.message].length).toBeGreaterThan(3_000);
+    expect(captured.payload.message).toContain(`Ссылка: https://example.com/${"x".repeat(3_100)}`);
     expect(captured.payload.message).not.toContain("secret");
   });
 
@@ -124,10 +131,10 @@ function seedChange(database: ApplicationDatabase, name: string, url = "https://
   const now = "2026-07-18T08:00:00.000Z";
   const id = database.monitors.createMonitor({ name, url, targetSelectors: ["body"], exclusionSelectors: [], intervalHours: 6 }, now);
   const baseline = database.monitors.claimNextCheck(now)!;
-  database.monitors.completeBaseline(baseline, { formatVersion: 1, sha256: "a".repeat(64), canonicalJson: '{"a":1}' }, now, "2026-07-18T14:00:00.000Z");
+  database.monitors.completeBaseline(baseline, { formatVersion: 1, sha256: "a".repeat(64), canonicalJson: snapshotJson("Old role") }, now, "2026-07-18T14:00:00.000Z");
   database.monitors.enqueueManualCheck(id, now);
   const changed = database.monitors.claimNextCheck(now)!;
-  database.monitors.completeChange(changed, { formatVersion: 1, sha256: "b".repeat(64), canonicalJson: '{"a":2}' }, now, "2026-07-18T14:00:00.000Z");
+  database.monitors.completeChange(changed, { formatVersion: 1, sha256: "b".repeat(64), canonicalJson: snapshotJson("New role") }, now, "2026-07-18T14:00:00.000Z");
 }
 
 function seedControl(database: ApplicationDatabase): void {
@@ -138,4 +145,14 @@ function seedControl(database: ApplicationDatabase): void {
   database.monitors.completeBaseline(baseline, { formatVersion: 1, sha256: "a".repeat(64), canonicalJson: '{"a":1}' }, now, "2026-07-18T14:00:00.000Z");
   database.monitors.enqueueManualCheck(id, now);
   database.monitors.completeNoChange(database.monitors.claimNextCheck(now)!, now, "2026-07-18T14:00:00.000Z");
+}
+
+function snapshotJson(visibleText: string): string {
+  return JSON.stringify({
+    formatVersion: 1,
+    targets: [{
+      elements: [{ namespace: "http://www.w3.org/1999/xhtml", name: "div", childElementCount: 0 }],
+      visibleText,
+    }],
+  });
 }

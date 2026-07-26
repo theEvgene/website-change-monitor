@@ -69,7 +69,7 @@ export interface NotificationEventRecord {
 
 export interface TelegramDeliveryJob {
   deliveryId: number; eventId: number; kind: NotificationEventRecord["kind"];
-  monitorName: string; url: string; title: string; body: string; observedAt: string;
+  checkId: number; monitorName: string; url: string; title: string; body: string; observedAt: string;
 }
 
 export interface NotificationFeed {
@@ -1161,13 +1161,13 @@ export function createMonitorStore(
     claimTelegramDelivery(bootId, now) {
       return database.transaction(() => {
         const row = database.prepare(`
-          SELECT d.id delivery_id, e.id event_id, e.kind, e.monitor_name, e.url, e.title, e.body, e.observed_at
+          SELECT d.id delivery_id, e.id event_id, e.kind, e.check_id, e.monitor_name, e.url, e.title, e.body, e.observed_at
           FROM notification_deliveries d JOIN notification_events e ON e.id = d.event_id
           WHERE d.boot_id = ? AND d.state = 'pending' ORDER BY d.id LIMIT 1
-        `).get(bootId) as { delivery_id: number; event_id: number; kind: NotificationEventRecord["kind"]; monitor_name: string; url: string; title: string; body: string; observed_at: string } | undefined;
+        `).get(bootId) as { delivery_id: number; event_id: number; kind: NotificationEventRecord["kind"]; check_id: number; monitor_name: string; url: string; title: string; body: string; observed_at: string } | undefined;
         if (row === undefined) return undefined;
         if (database.prepare(`UPDATE notification_deliveries SET state = 'sending', updated_at = ? WHERE id = ? AND state = 'pending'`).run(now, row.delivery_id).changes !== 1) return undefined;
-        return { deliveryId: row.delivery_id, eventId: row.event_id, kind: row.kind, monitorName: row.monitor_name, url: row.url, title: row.title, body: row.body, observedAt: row.observed_at };
+        return { deliveryId: row.delivery_id, eventId: row.event_id, kind: row.kind, checkId: row.check_id, monitorName: row.monitor_name, url: row.url, title: row.title, body: row.body, observedAt: row.observed_at };
       })();
     },
     finishTelegramDelivery(deliveryId, state, failureReason, diagnostic, now) {

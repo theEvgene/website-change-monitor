@@ -78,4 +78,3 @@
 
 - Website Change Monitor: `tests/telegram-dispatcher.test.ts`, `tests/monitor-service.test.ts`, `tests/control-notifications.test.ts` — 49 тестов прошли.
 - `telegram-alert-bus`: `tests/test_formatter.py`, `tests/test_service.py` — 8 тестов прошли.
-

@@ -7,6 +7,9 @@ export interface TelegramChangeDetails {
   complete: boolean;
 }
 
+const DETAILS_CHARACTER_BUDGET = 300;
+const BALANCED_SECTION_CHARACTER_BUDGET = DETAILS_CHARACTER_BUDGET / 2;
+
 export function projectTelegramChangeDetails(
   comparison: SnapshotComparison,
 ): TelegramChangeDetails {
@@ -102,12 +105,16 @@ function sectionBudgets(
 ): { added: number; removed: number } {
   const addedLength = fragmentsLength(added);
   const removedLength = fragmentsLength(removed);
-  if (addedLength === 0) return { added: 0, removed: Math.min(300, removedLength) };
-  if (removedLength === 0) return { added: Math.min(300, addedLength), removed: 0 };
+  if (addedLength === 0) {
+    return { added: 0, removed: Math.min(DETAILS_CHARACTER_BUDGET, removedLength) };
+  }
+  if (removedLength === 0) {
+    return { added: Math.min(DETAILS_CHARACTER_BUDGET, addedLength), removed: 0 };
+  }
 
-  let addedBudget = Math.min(150, addedLength);
-  let removedBudget = Math.min(150, removedLength);
-  let remaining = 300 - addedBudget - removedBudget;
+  let addedBudget = Math.min(BALANCED_SECTION_CHARACTER_BUDGET, addedLength);
+  let removedBudget = Math.min(BALANCED_SECTION_CHARACTER_BUDGET, removedLength);
+  let remaining = DETAILS_CHARACTER_BUDGET - addedBudget - removedBudget;
   const extraAdded = Math.min(remaining, addedLength - addedBudget);
   addedBudget += extraAdded;
   remaining -= extraAdded;

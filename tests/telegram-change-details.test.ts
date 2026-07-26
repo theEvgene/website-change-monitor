@@ -175,6 +175,34 @@ describe("Telegram Change details", () => {
       complete: true,
     });
   });
+
+  it("preserves text-fragment order across multiple target areas", () => {
+    const details = projectTelegramChangeDetails({
+      complete: true,
+      targets: [
+        {
+          kind: "replace",
+          structure: [],
+          text: [
+            { kind: "delete", before: "first removed", after: null },
+            { kind: "insert", before: null, after: "first added" },
+          ],
+        },
+        {
+          kind: "replace",
+          structure: [],
+          text: [
+            { kind: "replace", before: "second removed", after: "second added" },
+          ],
+        },
+      ],
+    });
+
+    expect(details).toMatchObject({
+      added: ["first added", "second added"],
+      removed: ["first removed", "second removed"],
+    });
+  });
 });
 
 function comparison(

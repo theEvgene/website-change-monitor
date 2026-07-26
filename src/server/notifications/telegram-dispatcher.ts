@@ -3,7 +3,12 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { isAbsolute } from "node:path";
 
+import { compareSnapshots } from "../application/snapshot-comparison.js";
 import type { MonitorStore, TelegramDeliveryJob } from "../persistence/monitor-store.js";
+import {
+  formatTelegramChangeMessage,
+  projectTelegramChangeDetails,
+} from "./telegram-change-details.js";
 
 export interface TelegramChannelState { status: "available" | "unavailable"; reason: string | null }
 export interface TelegramDispatcher {
@@ -54,7 +59,7 @@ export function createTelegramDispatcher(options: {
       if (path === null) return;
       const job = options.store.claimTelegramDelivery(bootId, now().toISOString());
       if (job === undefined) return;
-      const result = await runProcess(path, [...(options.argsPrefix ?? []), "send"], JSON.stringify(payload(job)), options.deadlineMs ?? 70_000, options.environment, dispatchAbort.signal);
+      const result = await runProcess(path, [...(options.argsPrefix ?? []), "send"], JSON.stringify(payload(job, options.store)), options.deadlineMs ?? 70_000, options.environment, dispatchAbort.signal);
       if (result.kind === "aborted") return;
       const outcome = deliveryOutcome(result);
       options.store.finishTelegramDelivery(job.deliveryId, outcome.state, outcome.reason, result.diagnostic, now().toISOString());
@@ -80,12 +85,28 @@ export function createTelegramDispatcher(options: {
   };
 }
 
-function payload(job: TelegramDeliveryJob) {
+function payload(job: TelegramDeliveryJob, store: MonitorStore) {
+  const sourceUrl = safeUrl(job.url);
+  let message = `${job.title}\nURL: ${sourceUrl}\n${job.body}`;
+  if (job.kind === "change_detected") {
+    const pair = store.getComparison(job.checkId);
+    if (pair !== undefined) {
+      message = formatTelegramChangeMessage({
+        title: job.title,
+        monitorName: job.monitorName,
+        sourceUrl,
+        details: projectTelegramChangeDetails(compareSnapshots(
+          pair.beforeCanonicalJson,
+          pair.afterCanonicalJson,
+        )),
+      });
+    }
+  }
   return {
     monitor_id: truncate(job.monitorName.trim().normalize("NFC") || "monitor", 100),
     status: job.kind === "change_detected" ? "warning" : job.kind === "control_check_ok" ? "success" : "error",
     observed_at: job.observedAt,
-    message: truncate(`${job.title}\nURL: ${safeUrl(job.url)}\n${job.body}`, 3_000),
+    message,
   };
 }
 function safeUrl(value: string): string {

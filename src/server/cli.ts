@@ -124,11 +124,13 @@ async function main(): Promise<void> {
       return;
     }
 
+    const logger = createNdjsonLogger(paths.logs);
     const outcome = await startApplication({
       rootDirectory,
       staticRoot: resolve(process.cwd(), "dist", "client"),
       port,
       version: applicationVersion(),
+      logger,
       openBrowser: process.env.WEBSITE_CHANGE_MONITOR_SKIP_OPEN_BROWSER === "1"
         ? async () => undefined
         : openInDefaultBrowser,
@@ -144,7 +146,6 @@ async function main(): Promise<void> {
     }
 
     process.stdout.write(`Website Change Monitor: http://127.0.0.1:${port}/\n`);
-    const logger = createNdjsonLogger(paths.logs);
     logger.write("application_started", { port });
     let closing = false;
     const close = () => {

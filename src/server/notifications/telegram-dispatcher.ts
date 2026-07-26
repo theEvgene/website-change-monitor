@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { isAbsolute } from "node:path";
 
 import { compareSnapshots } from "../application/snapshot-comparison.js";
+import type { NdjsonLogger } from "../operations/logger.js";
 import type { MonitorStore, TelegramDeliveryJob } from "../persistence/monitor-store.js";
 import {
   formatTelegramChangeMessage,
@@ -15,6 +16,12 @@ export interface TelegramDispatcher {
   initialize(): Promise<void>; recheck(): Promise<TelegramChannelState>;
   ensureAvailable(): Promise<boolean>; drain(): Promise<void>; stop(timeoutMs?: number): Promise<void>;
   state(): TelegramChannelState;
+}
+type ChangeDetailFailureStage = "comparison_data" | "comparison" | "projection" | "formatting";
+interface DetailPreparation {
+  compare: typeof compareSnapshots;
+  project: typeof projectTelegramChangeDetails;
+  format: typeof formatTelegramChangeMessage;
 }
 
 export async function inspectTelegramExecutable(
@@ -39,8 +46,15 @@ export async function inspectTelegramExecutable(
 export function createTelegramDispatcher(options: {
   store: MonitorStore; executablePath: string | null | (() => string | null); deadlineMs?: number;
   availabilityDeadlineMs?: number; now?: () => Date; argsPrefix?: string[]; environment?: NodeJS.ProcessEnv;
+  logger?: NdjsonLogger;
+  detailPreparation?: Partial<DetailPreparation>;
 }): TelegramDispatcher {
   const bootId = randomUUID(); const now = options.now ?? (() => new Date());
+  const detailPreparation: DetailPreparation = {
+    compare: options.detailPreparation?.compare ?? compareSnapshots,
+    project: options.detailPreparation?.project ?? projectTelegramChangeDetails,
+    format: options.detailPreparation?.format ?? formatTelegramChangeMessage,
+  };
   const dispatchAbort = new AbortController();
   const executablePath = () => typeof options.executablePath === "function" ? options.executablePath() : options.executablePath;
   let channelState: TelegramChannelState = { status: "unavailable", reason: "Telegram не настроен." };
@@ -59,7 +73,7 @@ export function createTelegramDispatcher(options: {
       if (path === null) return;
       const job = options.store.claimTelegramDelivery(bootId, now().toISOString());
       if (job === undefined) return;
-      const result = await runProcess(path, [...(options.argsPrefix ?? []), "send"], JSON.stringify(payload(job, options.store)), options.deadlineMs ?? 70_000, options.environment, dispatchAbort.signal);
+      const result = await runProcess(path, [...(options.argsPrefix ?? []), "send"], JSON.stringify(payload(job, options.store, detailPreparation, options.logger)), options.deadlineMs ?? 70_000, options.environment, dispatchAbort.signal);
       if (result.kind === "aborted") return;
       const outcome = deliveryOutcome(result);
       options.store.finishTelegramDelivery(job.deliveryId, outcome.state, outcome.reason, result.diagnostic, now().toISOString());
@@ -85,29 +99,90 @@ export function createTelegramDispatcher(options: {
   };
 }
 
-function payload(job: TelegramDeliveryJob, store: MonitorStore) {
+function payload(
+  job: TelegramDeliveryJob,
+  store: MonitorStore,
+  detailPreparation: DetailPreparation,
+  logger?: NdjsonLogger,
+) {
   const sourceUrl = safeUrl(job.url);
   let message = `${job.title}\nURL: ${sourceUrl}\n${job.body}`;
   if (job.kind === "change_detected") {
-    const pair = store.getComparison(job.checkId);
-    if (pair !== undefined) {
-      message = formatTelegramChangeMessage({
-        title: job.title,
-        monitorName: job.monitorName,
-        sourceUrl,
-        details: projectTelegramChangeDetails(compareSnapshots(
+    let pair;
+    try {
+      pair = store.getComparison(job.checkId);
+    } catch (error: unknown) {
+      logChangeDetailsFailure(logger, job, "comparison_data", errorName(error));
+      return telegramPayload(job, message);
+    }
+    if (pair === undefined) {
+      logChangeDetailsFailure(logger, job, "comparison_data", "ComparisonDataUnavailable");
+    } else {
+      let comparison;
+      try {
+        comparison = detailPreparation.compare(
           pair.beforeCanonicalJson,
           pair.afterCanonicalJson,
-        )),
-      });
+        );
+      } catch (error: unknown) {
+        logChangeDetailsFailure(logger, job, "comparison", errorName(error));
+        return telegramPayload(job, message);
+      }
+      let details;
+      try {
+        details = detailPreparation.project(comparison);
+      } catch (error: unknown) {
+        logChangeDetailsFailure(logger, job, "projection", errorName(error));
+        return telegramPayload(job, message);
+      }
+      try {
+        message = detailPreparation.format({
+          title: job.title,
+          monitorName: job.monitorName,
+          sourceUrl,
+          details,
+        });
+      } catch (error: unknown) {
+        logChangeDetailsFailure(logger, job, "formatting", errorName(error));
+      }
     }
   }
+  return telegramPayload(job, message);
+}
+function telegramPayload(job: TelegramDeliveryJob, message: string) {
   return {
     monitor_id: truncate(job.monitorName.trim().normalize("NFC") || "monitor", 100),
     status: job.kind === "change_detected" ? "warning" : job.kind === "control_check_ok" ? "success" : "error",
     observed_at: job.observedAt,
     message,
   };
+}
+function logChangeDetailsFailure(
+  logger: NdjsonLogger | undefined,
+  job: TelegramDeliveryJob,
+  stage: ChangeDetailFailureStage,
+  errorName: string,
+): void {
+  try {
+    logger?.write("telegram_change_details_failed", {
+      deliveryId: job.deliveryId,
+      checkId: job.checkId,
+      stage,
+      errorName,
+      errorMessage: "Change detail preparation failed.",
+    });
+  } catch {
+    // Logging is best-effort and must never block the base Telegram alert.
+  }
+}
+function errorName(error: unknown): string {
+  if (
+    error instanceof Error &&
+    /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/u.test(error.name)
+  ) {
+    return error.name;
+  }
+  return "Error";
 }
 function safeUrl(value: string): string {
   try {

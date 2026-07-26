@@ -15,6 +15,7 @@ import {
 import { previewPage, PreviewInputError } from "../application/preview-page.js";
 import type { ApplicationDatabase } from "../persistence/database.js";
 import { createTelegramDispatcher } from "../notifications/telegram-dispatcher.js";
+import type { NdjsonLogger } from "../operations/logger.js";
 import {
   apiError,
   apiErrorSchemaV1,
@@ -77,6 +78,7 @@ export interface BuildHttpServerOptions {
   orchestrationTimeoutMs?: number;
   telegramDeadlineMs?: number;
   telegramAvailabilityDeadlineMs?: number;
+  logger?: NdjsonLogger;
 }
 
 export function buildHttpServer(
@@ -87,6 +89,7 @@ export function buildHttpServer(
   const telegram = createTelegramDispatcher({
     store: options.database.monitors,
     executablePath: () => options.database.telegramExecutablePath(),
+    ...(options.logger === undefined ? {} : { logger: options.logger }),
     ...(options.telegramDeadlineMs === undefined ? {} : { deadlineMs: options.telegramDeadlineMs }),
     ...(options.telegramAvailabilityDeadlineMs === undefined ? {} : { availabilityDeadlineMs: options.telegramAvailabilityDeadlineMs }),
   });

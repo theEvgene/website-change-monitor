@@ -8,6 +8,7 @@ import {
   type ApplicationDatabase,
 } from "../persistence/database.js";
 import { isWebsiteChangeMonitorAtPort } from "./instance.js";
+import type { NdjsonLogger } from "./logger.js";
 
 export interface StartApplicationOptions {
   rootDirectory: string;
@@ -19,6 +20,7 @@ export interface StartApplicationOptions {
   workerIntervalMs?: number;
   workerShutdownMs?: number;
   orchestrationTimeoutMs?: number;
+  logger?: NdjsonLogger;
 }
 
 export type StartOutcome =
@@ -59,6 +61,7 @@ export async function startApplication(
       version: options.version,
       port: options.port,
       staticRoot: options.staticRoot,
+      ...(options.logger === undefined ? {} : { logger: options.logger }),
       ...(pageProbeRuntime === undefined
         ? {}
         : { pageProbe: pageProbeRuntime.pageProbe }),

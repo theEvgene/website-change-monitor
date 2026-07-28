@@ -31,6 +31,7 @@ describe("public HTTP contract", () => {
       "/api/check-intents",
       "/api/checks",
       "/api/checks/{checkId}/comparison",
+      "/api/checks/{checkId}/diagnostics",
       "/api/health",
       "/api/labels",
       "/api/monitors",
@@ -51,6 +52,7 @@ describe("public HTTP contract", () => {
     expect(document.paths["/api/labels"]?.get?.operationId).toBe("listLabels");
     expect(document.paths["/api/check-intents"]?.get?.operationId).toBe("listCheckIntents");
     expect(document.paths["/api/checks/{checkId}/comparison"]?.get?.operationId).toBe("getComparison");
+    expect(document.paths["/api/checks/{checkId}/diagnostics"]?.get?.operationId).toBe("getCheckDiagnostic");
     expect(document.paths["/api/preview"]?.post?.operationId).toBe(
       "previewObservationScope",
     );
@@ -82,6 +84,8 @@ describe("public HTTP contract", () => {
     expect(document.paths["/api/settings/notifications"]?.put?.operationId).toBe("updateNotificationSettings");
     expect(Object.keys(document.components.schemas).sort()).toEqual([
       "ApiErrorV1",
+      "CheckDiagnosticResponseV1",
+      "CheckDiagnosticV1",
       "CheckIntentListResponseV1",
       "CheckIntentV1",
       "ComparisonResponseV1",

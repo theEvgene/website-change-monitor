@@ -12,8 +12,15 @@ import type {
   MonitorSummaryRecord,
   NotificationFeed,
   NotificationPolicy,
+  CheckDiagnosticLookup,
 } from "../persistence/monitor-store.js";
 import { defaultNotificationPolicy } from "../persistence/monitor-store.js";
+import type { NdjsonLogger } from "../operations/logger.js";
+import {
+  diagnosticFromProbeFailure,
+  diagnosticFromSnapshotFailure,
+} from "./check-diagnostics.js";
+import type { CheckDiagnosticInput } from "../domain/check-diagnostic.js";
 import type { PagePreview, PageProbe } from "./page-probe.js";
 import { PageProbeError } from "./page-probe.js";
 import {
@@ -106,6 +113,7 @@ export interface MonitorService {
         afterSnapshotId: number;
       })
     | undefined;
+  getCheckDiagnostic(id: number): CheckDiagnosticLookup | undefined;
   getMonitor(id: number): MonitorView | undefined;
   setPaused(id: number, paused: boolean): Promise<MonitorView | undefined>;
   runAvailableChecks(): Promise<void>;
@@ -129,6 +137,7 @@ export function createMonitorService(options: {
   beforeNotificationCommit?: () => Promise<void>;
   afterNotificationCommits?: () => void;
   notificationPolicy?: () => NotificationPolicy;
+  logger?: NdjsonLogger;
 }): MonitorService {
   const clock = options.clock ?? { now: () => new Date() };
   let workerTail: Promise<void> = Promise.resolve();
@@ -142,6 +151,28 @@ export function createMonitorService(options: {
 
   async function prepareNotification(): Promise<void> {
     await options.beforeNotificationCommit?.().catch(() => undefined);
+  }
+
+  function recordDiagnostic(
+    checkId: number,
+    diagnosticFactory: () => CheckDiagnosticInput,
+  ): void {
+    try {
+      options.database.monitors.recordCheckDiagnostic(
+        checkId,
+        diagnosticFactory(),
+      );
+    } catch {
+      try {
+        options.logger?.write("check_diagnostic_failed", {
+          checkId,
+          stage: "persistence",
+          message: "Check diagnostic was unavailable.",
+        });
+      } catch {
+        // Diagnostics and their operational fallback are both best-effort.
+      }
+    }
   }
 
   async function drainChecks(): Promise<void> {
@@ -183,6 +214,8 @@ export function createMonitorService(options: {
           nextCheckAt,
           notificationPolicy(),
         );
+        recordDiagnostic(claimed.checkId, () =>
+          diagnosticFromProbeFailure(result, completedAt.toISOString()));
         continue;
       }
       try {
@@ -230,6 +263,11 @@ export function createMonitorService(options: {
           nextCheckAt,
           notificationPolicy(),
         );
+        recordDiagnostic(claimed.checkId, () =>
+          diagnosticFromSnapshotFailure(
+            result.preview,
+            completedAt.toISOString(),
+          ));
       }
       if (stopping) return;
     }
@@ -310,6 +348,8 @@ export function createMonitorService(options: {
         ...comparison,
       };
     },
+    getCheckDiagnostic: (id) =>
+      options.database.monitors.getCheckDiagnostic(id),
     getMonitor: (id) => options.database.monitors.getMonitor(id),
     async setPaused(id, paused) {
       const updated = options.database.monitors.setPaused(

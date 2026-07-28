@@ -1,6 +1,11 @@
 import type BetterSqlite3 from "better-sqlite3";
 
 import { normalizeLabelKey } from "../domain/label.js";
+import type {
+  CheckDiagnosticInput,
+  CheckDiagnosticStage,
+} from "../domain/check-diagnostic.js";
+import { normalizeCheckDiagnostic } from "../domain/check-diagnostic.js";
 
 export type CheckIntentKind = "scheduled" | "overdue" | "manual" | "retry";
 export type CheckStatus = "running" | "succeeded" | "failed";
@@ -163,6 +168,22 @@ export interface ComparisonSnapshotPair {
   afterCanonicalJson: string;
 }
 
+export interface CheckDiagnosticRecord extends CheckDiagnosticInput {
+  checkId: number;
+}
+
+export type CheckDiagnosticLookup =
+  | {
+      checkId: number;
+      availability: "available";
+      diagnostic: CheckDiagnosticRecord;
+    }
+  | {
+      checkId: number;
+      availability: "not_applicable" | "unavailable";
+      diagnostic: null;
+    };
+
 export interface MonitorStore {
   createMonitor(input: CreateMonitorRecord, now: string): number;
   updateMonitor(id: number, input: UpdateMonitorRecord, now: string): boolean;
@@ -198,6 +219,8 @@ export interface MonitorStore {
     nextCheckAt: string,
     policy: NotificationPolicy,
   ): void;
+  recordCheckDiagnostic(checkId: number, diagnostic: CheckDiagnosticInput): void;
+  getCheckDiagnostic(checkId: number): CheckDiagnosticLookup | undefined;
   setPaused(monitorId: number, paused: boolean, now: string): boolean | undefined;
   listMonitors(label?: string): MonitorSummaryRecord[];
   listLabels(): string[];
@@ -474,6 +497,40 @@ export function createMonitorStore(
         error_message = ?, completed_at = ?, is_final_error = ?
     WHERE id = ? AND status = 'running'
   `);
+  const insertCheckDiagnostic = database.prepare(`
+    INSERT INTO check_diagnostics (
+      check_id, recorded_at, stage, final_url, http_status, total_ms,
+      navigation_ms, target_ms, scroll_ms, stability_ms, extraction_ms,
+      selector_field, selector_index
+    ) SELECT
+      @checkId, @recordedAt, @stage, @finalUrl, @httpStatus, @totalMs,
+      @navigationMs, @targetMs, @scrollMs, @stabilityMs, @extractionMs,
+      @selectorField, @selectorIndex
+    FROM checks
+    WHERE id = @checkId AND result = 'error'
+    ON CONFLICT(check_id) DO NOTHING
+  `);
+  function recordCheckDiagnostic(
+    checkId: number,
+    diagnostic: CheckDiagnosticInput,
+  ): void {
+    const normalized = normalizeCheckDiagnostic(diagnostic);
+    insertCheckDiagnostic.run({
+      checkId,
+      recordedAt: normalized.recordedAt,
+      stage: normalized.stage,
+      finalUrl: normalized.finalUrl ?? null,
+      httpStatus: normalized.httpStatus ?? null,
+      totalMs: normalized.totalMs,
+      navigationMs: normalized.navigationMs ?? null,
+      targetMs: normalized.targetMs ?? null,
+      scrollMs: normalized.scrollMs ?? null,
+      stabilityMs: normalized.stabilityMs ?? null,
+      extractionMs: normalized.extractionMs ?? null,
+      selectorField: normalized.selectorField ?? null,
+      selectorIndex: normalized.selectorIndex ?? null,
+    });
+  }
   const finishIntent = database.prepare(`
     UPDATE check_intents
     SET state = 'finished', finished_at = ?
@@ -798,7 +855,8 @@ export function createMonitorStore(
   const recoverInterruptedTransaction = database.transaction((now: string) => {
     const rows = database.prepare(`
       SELECT i.id intent_id, i.kind, i.monitor_id, i.scope_revision,
-             c.id check_id, m.name monitor_name, m.url, m.interval_hours, i.retry_of_check_id
+             c.id check_id, c.started_at, m.name monitor_name, m.url,
+             m.interval_hours, i.retry_of_check_id
       FROM check_intents i
       JOIN checks c ON c.intent_id = i.id AND c.status = 'running'
       JOIN monitors m ON m.id = i.monitor_id
@@ -807,6 +865,7 @@ export function createMonitorStore(
     `).all() as Array<{
       intent_id: number; kind: CheckIntentKind; monitor_id: number;
       scope_revision: number; check_id: number;
+      started_at: string;
       monitor_name: string; url: string; retry_of_check_id: number | null;
       interval_hours: 6 | 12 | 24 | 48 | 72;
     }>;
@@ -834,6 +893,7 @@ export function createMonitorStore(
         defaultNotificationPolicy,
       );
     }
+    return rows;
   });
 
   return {
@@ -876,12 +936,87 @@ export function createMonitorStore(
         `).run({ now, recover: recoverOverdue ? 1 : 0 });
       })();
     },
-    recoverInterrupted: recoverInterruptedTransaction,
+    recoverInterrupted(now) {
+      const recovered = recoverInterruptedTransaction(now);
+      for (const row of recovered) {
+        try {
+          const elapsed = new Date(now).getTime() -
+            new Date(row.started_at).getTime();
+          recordCheckDiagnostic(row.check_id, {
+            recordedAt: now,
+            stage: "application",
+            totalMs: Number.isSafeInteger(elapsed) && elapsed >= 0
+              ? Math.min(elapsed, 86_400_000)
+              : 0,
+          });
+        } catch {
+          // Recovery diagnostics are optional; the recovered Check is canonical.
+        }
+      }
+    },
     claimNextCheck: claimTransaction,
     completeBaseline: completeBaselineTransaction,
     completeNoChange: completeNoChangeTransaction,
     completeChange: completeChangeTransaction,
     failCheck: failCheckTransaction,
+    recordCheckDiagnostic,
+    getCheckDiagnostic(checkId) {
+      const row = database.prepare(`
+        SELECT
+          c.id check_id, c.result,
+          d.recorded_at, d.stage, d.final_url, d.http_status, d.total_ms,
+          d.navigation_ms, d.target_ms, d.scroll_ms, d.stability_ms,
+          d.extraction_ms, d.selector_field, d.selector_index
+        FROM checks c
+        LEFT JOIN check_diagnostics d ON d.check_id = c.id
+        WHERE c.id = ?
+      `).get(checkId) as {
+        check_id: number;
+        result: CheckResult | null;
+        recorded_at: string | null;
+        stage: CheckDiagnosticStage | null;
+        final_url: string | null;
+        http_status: number | null;
+        total_ms: number | null;
+        navigation_ms: number | null;
+        target_ms: number | null;
+        scroll_ms: number | null;
+        stability_ms: number | null;
+        extraction_ms: number | null;
+        selector_field: "targetSelectors" | "exclusionSelectors" | null;
+        selector_index: number | null;
+      } | undefined;
+      if (row === undefined) return undefined;
+      if (row.result !== "error") {
+        return { checkId, availability: "not_applicable", diagnostic: null };
+      }
+      if (
+        row.recorded_at === null ||
+        row.stage === null ||
+        row.total_ms === null
+      ) {
+        return { checkId, availability: "unavailable", diagnostic: null };
+      }
+      return {
+        checkId,
+        availability: "available",
+        diagnostic: {
+          checkId,
+          recordedAt: row.recorded_at,
+          stage: row.stage,
+          totalMs: row.total_ms,
+          ...nullable("finalUrl", row.final_url),
+          ...nullable("httpStatus", row.http_status),
+          ...nullable("navigationMs", row.navigation_ms),
+          ...nullable("targetMs", row.target_ms),
+          ...nullable("scrollMs", row.scroll_ms),
+          ...nullable("stabilityMs", row.stability_ms),
+          ...nullable("extractionMs", row.extraction_ms),
+          ...nullable("selectorField", row.selector_field),
+          ...nullable("selectorIndex", row.selector_index),
+        },
+      };
+    },
     setPaused: setPausedTransaction,
     listMonitors(label) {
       const rows = database
@@ -1263,6 +1398,12 @@ function selectLabels(database: BetterSqlite3.Database, monitorId: number): stri
   `).all(monitorId) as Array<{ name: string }>).map((row) => row.name);
 }
 
+function nullable<Key extends string, Value>(
+  key: Key,
+  value: Value | null,
+): { [Property in Key]?: Value } {
+  return value === null ? {} : { [key]: value } as { [Property in Key]?: Value };
+}
 
 function assertChanged(changes: number): void {
   if (changes !== 1) {

@@ -1,4 +1,7 @@
-import type { NotificationPolicy } from "../persistence/monitor-store.js";
+import {
+  defaultNotificationPolicy,
+  type NotificationPolicy,
+} from "../persistence/monitor-store.js";
 
 export interface RuntimeNotificationSettings extends NotificationPolicy {
   telegramPhase: "enabled" | "disabled";
@@ -13,8 +16,7 @@ export function createRuntimeNotificationSettings(options: {
   disablePendingTelegramDeliveries(now: string): void;
 }): RuntimeNotificationSettingsController {
   let current: RuntimeNotificationSettings = {
-    telegramEnabled: true,
-    notifyWhenUnchanged: false,
+    ...defaultNotificationPolicy,
     telegramPhase: "enabled",
   };
 

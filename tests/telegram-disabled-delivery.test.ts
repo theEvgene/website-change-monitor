@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
+import BetterSqlite3 from "better-sqlite3";
 
 import { openApplicationDatabase } from "../src/server/persistence/database.js";
 
@@ -55,6 +56,32 @@ describe("disabled Telegram deliveries", () => {
       expect(database.monitors.listNotifications().items.map((event) => event.telegram.state)).toEqual([
         "delivered",
         "sending",
+        "disabled",
+      ]);
+    } finally {
+      database.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not disable pending work owned by another boot", async () => {
+    const root = await mkdtemp(join(tmpdir(), "wcm-disabled-other-boot-"));
+    const database = openApplicationDatabase({ rootDirectory: root });
+    const now = "2026-07-18T08:00:00.000Z";
+    try {
+      database.monitors.beginTelegramSession("current-boot", true, now);
+      seedChange(database, "Other boot", true, now);
+      const inspection = new BetterSqlite3(database.path);
+      try {
+        inspection.prepare("UPDATE notification_deliveries SET boot_id = 'other-boot'").run();
+      } finally {
+        inspection.close();
+      }
+      seedChange(database, "Current boot", true, now);
+
+      database.monitors.disablePendingTelegramDeliveries("2026-07-18T08:01:00.000Z");
+      expect(database.monitors.listNotifications().items.map((event) => event.telegram.state)).toEqual([
+        "pending",
         "disabled",
       ]);
     } finally {

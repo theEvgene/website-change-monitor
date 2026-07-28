@@ -204,6 +204,21 @@ describe("Telegram dispatcher", () => {
     expect(fixture.database.monitors.listNotifications().items[0]!.telegram.state).toBe("timeout");
   });
 
+  it("does not invoke the sender while runtime dispatch is disabled", async () => {
+    const fixture = await setup({});
+    const dispatcher = createTelegramDispatcher({
+      store: fixture.database.monitors,
+      executablePath: process.execPath,
+      argsPrefix: [fixture.script],
+      environment: fixture.environment,
+      canDispatch: () => false,
+    });
+    await dispatcher.initialize();
+    seedChange(fixture.database, "Disabled runtime");
+    await dispatcher.drain();
+    expect(fixture.database.monitors.listNotifications().items[0]!.telegram.state).toBe("pending");
+  });
+
   it("does not resend old unavailable delivery after recovery and abandons old pending on restart", async () => {
     const fixture = await setup({ FAKE_AVAILABLE: "0" });
     const first = createTelegramDispatcher({ store: fixture.database.monitors, executablePath: process.execPath, argsPrefix: [fixture.script], environment: fixture.environment });
@@ -300,12 +315,16 @@ function seedChange(database: ApplicationDatabase, name: string, url = "https://
 
 function seedControl(database: ApplicationDatabase): void {
   const now = "2026-07-18T08:00:00.000Z";
-  database.monitors.updateNotificationSettings(true);
   const id = database.monitors.createMonitor({ name: "Catalog", url: "https://example.com", targetSelectors: ["body"], exclusionSelectors: [], intervalHours: 6 }, now);
   const baseline = database.monitors.claimNextCheck(now)!;
   database.monitors.completeBaseline(baseline, { formatVersion: 1, sha256: "a".repeat(64), canonicalJson: '{"a":1}' }, now, "2026-07-18T14:00:00.000Z");
   database.monitors.enqueueManualCheck(id, now);
-  database.monitors.completeNoChange(database.monitors.claimNextCheck(now)!, now, "2026-07-18T14:00:00.000Z");
+  database.monitors.completeNoChange(
+    database.monitors.claimNextCheck(now)!,
+    now,
+    "2026-07-18T14:00:00.000Z",
+    { telegramEnabled: true, notifyWhenUnchanged: true },
+  );
 }
 
 function snapshotJson(visibleText: string): string {

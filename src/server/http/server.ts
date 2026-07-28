@@ -15,6 +15,7 @@ import {
 import { previewPage, PreviewInputError } from "../application/preview-page.js";
 import type { ApplicationDatabase } from "../persistence/database.js";
 import { createTelegramDispatcher } from "../notifications/telegram-dispatcher.js";
+import { createRuntimeNotificationSettings } from "../notifications/runtime-notification-settings.js";
 import type { NdjsonLogger } from "../operations/logger.js";
 import {
   apiError,
@@ -27,6 +28,7 @@ import {
   notificationEventSchemaV1,
   notificationFeedSchemaV1,
   notificationSettingsSchemaV1,
+  notificationSettingsUpdateSchemaV1,
   createMonitorRouteSchema,
   getMonitorRouteSchema,
   getComparisonRouteSchema,
@@ -86,12 +88,16 @@ export function buildHttpServer(
 ): FastifyInstance {
   const server = Fastify({ logger: false, trustProxy: false });
   const pageProbe = options.pageProbe ?? unavailablePageProbe;
+  const notificationSettings = createRuntimeNotificationSettings({
+    disablePendingTelegramDeliveries: (now) => options.database.monitors.disablePendingTelegramDeliveries(now),
+  });
   const telegram = createTelegramDispatcher({
     store: options.database.monitors,
     executablePath: () => options.database.telegramExecutablePath(),
     ...(options.logger === undefined ? {} : { logger: options.logger }),
     ...(options.telegramDeadlineMs === undefined ? {} : { deadlineMs: options.telegramDeadlineMs }),
     ...(options.telegramAvailabilityDeadlineMs === undefined ? {} : { availabilityDeadlineMs: options.telegramAvailabilityDeadlineMs }),
+    canDispatch: () => notificationSettings.state().telegramEnabled,
   });
   const monitors = createMonitorService({
     database: options.database,
@@ -99,8 +105,13 @@ export function buildHttpServer(
     ...(options.orchestrationTimeoutMs === undefined
       ? {}
       : { orchestrationTimeoutMs: options.orchestrationTimeoutMs }),
-    beforeNotificationCommit: async () => { await telegram.ensureAvailable(); },
-    afterNotificationCommits: () => { void telegram.drain(); },
+    beforeNotificationCommit: async () => {
+      if (notificationSettings.state().telegramEnabled) await telegram.ensureAvailable();
+    },
+    afterNotificationCommits: () => {
+      if (notificationSettings.state().telegramEnabled) void telegram.drain();
+    },
+    notificationPolicy: () => notificationSettings.state(),
   });
   let workerTimer: ReturnType<typeof setInterval> | undefined;
   const notificationStreams = new Set<ServerResponse>();
@@ -217,31 +228,36 @@ export function buildHttpServer(
     apiServer.addSchema(notificationEventSchemaV1);
     apiServer.addSchema(notificationFeedSchemaV1);
     apiServer.addSchema(notificationSettingsSchemaV1);
+    apiServer.addSchema(notificationSettingsUpdateSchemaV1);
     apiServer.addSchema(telegramStateSchemaV1);
 
     apiServer.get("/api/health", { schema: healthRouteSchema }, async () => {
       const database = options.database.diagnostics();
-      const telegramState = telegram.state();
+      const telegramState = notificationSettings.state().telegramEnabled
+        ? telegram.state()
+        : { status: "disabled" as const, reason: null };
       return {
         application: applicationId,
-        status: telegramState.status === "available" ? "ready" as const : "degraded" as const,
+        status: telegramState.status === "available" || telegramState.status === "disabled" ? "ready" as const : "degraded" as const,
         version: options.version,
         database: {
           status: database.status,
           schemaVersion: database.schemaVersion,
         },
-        telegram: telegramState.status === "available"
-          ? { status: "available" as const, reason: null }
-          : { status: "unavailable" as const, reason: telegramState.reason },
+        telegram: telegramState,
       };
     });
 
-    apiServer.get("/api/telegram", { schema: getTelegramStateRouteSchema }, async () => telegram.state());
-    apiServer.post("/api/telegram/recheck", { schema: recheckTelegramRouteSchema }, async () => telegram.recheck());
-    apiServer.get("/api/settings/notifications", { schema: getNotificationSettingsRouteSchema }, async () => options.database.monitors.notificationSettings());
-    apiServer.put<{ Body: { notifyWhenUnchanged: boolean } }>("/api/settings/notifications", { schema: updateNotificationSettingsRouteSchema }, async (request) => {
-      options.database.monitors.updateNotificationSettings(request.body.notifyWhenUnchanged);
-      return options.database.monitors.notificationSettings();
+    apiServer.get("/api/telegram", { schema: getTelegramStateRouteSchema }, async () => (
+      notificationSettings.state().telegramEnabled ? telegram.state() : { status: "disabled" as const, reason: null }
+    ));
+    apiServer.post("/api/telegram/recheck", { schema: recheckTelegramRouteSchema }, async () => (
+      notificationSettings.state().telegramEnabled ? telegram.recheck() : { status: "disabled" as const, reason: null }
+    ));
+    apiServer.get("/api/settings/notifications", { schema: getNotificationSettingsRouteSchema }, async () => notificationSettings.state());
+    apiServer.put<{ Body: { telegramEnabled?: boolean; notifyWhenUnchanged?: boolean } }>("/api/settings/notifications", { schema: updateNotificationSettingsRouteSchema }, async (request) => {
+      const current = notificationSettings.update(request.body, new Date().toISOString());
+      return current;
     });
 
     apiServer.get("/api/version", { schema: versionRouteSchema }, async () => ({

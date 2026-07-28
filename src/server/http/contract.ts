@@ -95,7 +95,7 @@ export const healthResponseSchemaV1 = {
       type: "object",
       additionalProperties: false,
       required: ["status", "reason"],
-      properties: { status: { enum: ["available", "unavailable", "disabled"], type: "string" }, reason: { type: ["string", "null"] } },
+      properties: { status: { enum: ["available", "unavailable", "checking", "disabled"], type: "string" }, reason: { type: ["string", "null"] } },
     },
   },
 } as const;
@@ -103,7 +103,7 @@ export const healthResponseSchemaV1 = {
 export const telegramStateSchemaV1 = {
   $id: "TelegramStateV1", type: "object", additionalProperties: false,
   required: ["status", "reason"], properties: {
-    status: { enum: ["available", "unavailable", "disabled"], type: "string" },
+    status: { enum: ["available", "unavailable", "checking", "disabled"], type: "string" },
     reason: { type: ["string", "null"] },
   },
 } as const;
@@ -507,7 +507,7 @@ export const notificationSettingsSchemaV1 = {
   required: ["telegramEnabled", "notifyWhenUnchanged", "telegramPhase"], properties: {
     telegramEnabled: { type: "boolean" },
     notifyWhenUnchanged: { type: "boolean" },
-    telegramPhase: { enum: ["enabled", "disabled"], type: "string" },
+    telegramPhase: { enum: ["checking", "enabled", "disabled"], type: "string" },
   },
 } as const;
 

@@ -102,6 +102,51 @@ describe("local HTTP server", () => {
     })).statusCode).toBe(400);
   });
 
+  it("keeps Telegram disabled when an older re-enable check completes late", async () => {
+    const root = await mkdtemp(join(tmpdir(), "website-change-monitor-")); roots.push(root);
+    const database = openApplicationDatabase({ rootDirectory: root }); databases.push(database);
+    let resolveCheck!: (state: { status: "available"; reason: null }) => void;
+    let inspections = 0;
+    const server = buildHttpServer({
+      database,
+      version: "0.1.0",
+      port: 43117,
+      inspectTelegramAvailability: () => {
+        inspections += 1;
+        if (inspections === 1) return Promise.resolve({ status: "available", reason: null });
+        return new Promise((resolve) => { resolveCheck = resolve; });
+      },
+    });
+    servers.push(server);
+    const headers = { host: "127.0.0.1:43117" };
+
+    await server.inject({ method: "PUT", url: "/api/settings/notifications", headers, payload: { telegramEnabled: false } });
+    expect((await server.inject({
+      method: "PUT",
+      url: "/api/settings/notifications",
+      headers,
+      payload: { telegramEnabled: true },
+    })).json()).toMatchObject({ telegramEnabled: true, telegramPhase: "checking" });
+    expect((await server.inject({ method: "GET", url: "/api/health", headers })).json()).toMatchObject({
+      status: "degraded",
+      telegram: { status: "checking", reason: null },
+    });
+
+    await server.inject({ method: "PUT", url: "/api/settings/notifications", headers, payload: { telegramEnabled: false } });
+    resolveCheck({ status: "available", reason: null });
+    await Promise.resolve();
+
+    expect((await server.inject({ method: "GET", url: "/api/settings/notifications", headers })).json()).toEqual({
+      telegramEnabled: false,
+      notifyWhenUnchanged: false,
+      telegramPhase: "disabled",
+    });
+    expect((await server.inject({ method: "GET", url: "/api/health", headers })).json()).toMatchObject({
+      status: "ready",
+      telegram: { status: "disabled", reason: null },
+    });
+  });
+
   it("serves the built React entry page from the same process", async () => {
     const root = await mkdtemp(join(tmpdir(), "website-change-monitor-"));
     roots.push(root);

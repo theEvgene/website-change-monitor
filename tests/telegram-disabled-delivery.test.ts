@@ -128,6 +128,32 @@ describe("disabled Telegram deliveries", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it("queues new deliveries during a re-enable check and resolves only those deliveries", async () => {
+    const root = await mkdtemp(join(tmpdir(), "wcm-checking-telegram-"));
+    const database = openApplicationDatabase({ rootDirectory: root });
+    const now = "2026-07-18T08:00:00.000Z";
+    try {
+      database.monitors.beginTelegramSession("current-boot", false, now);
+      seedChange(database, "Old unavailable", true, now);
+      database.monitors.beginTelegramAvailabilityCheck();
+      seedChange(database, "Waiting for check", true, now);
+
+      expect(database.monitors.listNotifications().items.map((event) => event.telegram.state)).toEqual([
+        "unavailable",
+        "pending",
+      ]);
+
+      database.monitors.setTelegramAvailable(false, "2026-07-18T08:01:00.000Z");
+      expect(database.monitors.listNotifications().items.map((event) => event.telegram.state)).toEqual([
+        "unavailable",
+        "unavailable",
+      ]);
+    } finally {
+      database.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });
 
 function seedChange(

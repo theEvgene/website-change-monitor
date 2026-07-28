@@ -219,6 +219,31 @@ describe("Telegram dispatcher", () => {
     expect(fixture.database.monitors.listNotifications().items[0]!.telegram.state).toBe("pending");
   });
 
+  it("checks the runtime gate again between deliveries in one drain", async () => {
+    const fixture = await setup({});
+    let gateChecks = 0;
+    const dispatcher = createTelegramDispatcher({
+      store: fixture.database.monitors,
+      executablePath: process.execPath,
+      argsPrefix: [fixture.script],
+      environment: fixture.environment,
+      canDispatch: () => {
+        gateChecks += 1;
+        return gateChecks < 3;
+      },
+    });
+    await dispatcher.initialize();
+    seedChange(fixture.database, "First");
+    seedChange(fixture.database, "Second");
+
+    await dispatcher.drain();
+
+    expect(fixture.database.monitors.listNotifications().items.map((event) => event.telegram.state)).toEqual([
+      "delivered",
+      "pending",
+    ]);
+  });
+
   it("does not resend old unavailable delivery after recovery and abandons old pending on restart", async () => {
     const fixture = await setup({ FAKE_AVAILABLE: "0" });
     const first = createTelegramDispatcher({ store: fixture.database.monitors, executablePath: process.execPath, argsPrefix: [fixture.script], environment: fixture.environment });

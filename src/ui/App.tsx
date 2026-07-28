@@ -14,7 +14,7 @@ interface HealthResponse {
     schemaVersion: number;
   };
   telegram: {
-    status: "available" | "unavailable" | "disabled";
+    status: "available" | "unavailable" | "checking" | "disabled";
     reason: string | null;
   };
 }
@@ -40,7 +40,7 @@ export function App() {
   const [monitorRefresh, setMonitorRefresh] = useState(0);
   const [notifyWhenUnchanged, setNotifyWhenUnchanged] = useState(false);
   const [telegramEnabled, setTelegramEnabled] = useState(true);
-  const [telegramPhase, setTelegramPhase] = useState<"enabled" | "disabled">("enabled");
+  const [telegramPhase, setTelegramPhase] = useState<"checking" | "enabled" | "disabled">("enabled");
   const [notificationSettingsReady, setNotificationSettingsReady] = useState(false);
   const [notificationSettingsBusy, setNotificationSettingsBusy] = useState(false);
   const [activeSection, setActiveSection] = useState<"monitors" | "journal" | "notifications">(sectionFromLocation);
@@ -100,7 +100,7 @@ export function App() {
       .then((settings) => {
         if (typeof settings?.telegramEnabled === "boolean") setTelegramEnabled(settings.telegramEnabled);
         if (typeof settings?.notifyWhenUnchanged === "boolean") setNotifyWhenUnchanged(settings.notifyWhenUnchanged);
-        if (settings?.telegramPhase === "enabled" || settings?.telegramPhase === "disabled") setTelegramPhase(settings.telegramPhase);
+        if (settings?.telegramPhase === "checking" || settings?.telegramPhase === "enabled" || settings?.telegramPhase === "disabled") setTelegramPhase(settings.telegramPhase);
         setNotificationSettingsReady(true);
       })
       .catch((error: unknown) => {
@@ -224,10 +224,19 @@ export function App() {
         body: JSON.stringify(patch),
       });
       if (!response.ok) throw new Error(`Notification settings update failed: ${response.status}`);
-      const settings = await response.json() as { telegramEnabled: boolean; notifyWhenUnchanged: boolean; telegramPhase: "enabled" | "disabled" };
+      let settings = await response.json() as { telegramEnabled: boolean; notifyWhenUnchanged: boolean; telegramPhase: "checking" | "enabled" | "disabled" };
       setTelegramEnabled(settings.telegramEnabled);
       setNotifyWhenUnchanged(settings.notifyWhenUnchanged);
       setTelegramPhase(settings.telegramPhase);
+      while (settings.telegramPhase === "checking") {
+        await new Promise((resolve) => window.setTimeout(resolve, 200));
+        const settingsResponse = await fetch("/api/settings/notifications", { headers: { accept: "application/json" } });
+        if (!settingsResponse.ok) throw new Error(`Notification settings refresh failed: ${settingsResponse.status}`);
+        settings = await settingsResponse.json() as typeof settings;
+        setTelegramEnabled(settings.telegramEnabled);
+        setNotifyWhenUnchanged(settings.notifyWhenUnchanged);
+        setTelegramPhase(settings.telegramPhase);
+      }
       const healthResponse = await fetch("/api/health", { headers: { accept: "application/json" } });
       if (healthResponse.ok) {
         const health = await healthResponse.json() as HealthResponse;
@@ -279,18 +288,22 @@ function SystemStatusDialog({
               <span className={`component-dot ${
                 state.health.telegram.status === "available"
                   ? "component-dot--ready"
-                  : state.health.telegram.status === "disabled"
-                    ? "component-dot--disabled"
-                    : "component-dot--warning"
+                  : state.health.telegram.status === "checking"
+                    ? "component-dot--loading"
+                    : state.health.telegram.status === "disabled"
+                      ? "component-dot--disabled"
+                      : "component-dot--warning"
               }`} />
               <div>
                 <h3>Канал уведомлений</h3>
                 <p>{
                   state.health.telegram.status === "available"
                     ? "Telegram доступен"
-                    : state.health.telegram.status === "disabled"
-                      ? "Telegram отключён"
-                      : "Telegram пока не настроен"
+                    : state.health.telegram.status === "checking"
+                      ? "Проверяем Telegram"
+                      : state.health.telegram.status === "disabled"
+                        ? "Telegram отключён"
+                        : "Telegram пока не настроен"
                 }</p>
                 {state.health.telegram.status === "disabled" ? <small>Уведомления через Telegram отключены в настройках.</small> : null}
                 {state.health.telegram.status === "unavailable" ? (
@@ -318,7 +331,7 @@ function SettingsDialog({
 }: {
   telegramEnabled: boolean;
   notifyWhenUnchanged: boolean;
-  telegramPhase: "enabled" | "disabled";
+  telegramPhase: "checking" | "enabled" | "disabled";
   disabled: boolean;
   onChange: (patch: { telegramEnabled?: boolean; notifyWhenUnchanged?: boolean }) => void;
   onClose: () => void;
@@ -336,7 +349,7 @@ function SettingsDialog({
         </label>
         <label className="notification-switch settings-option">
           <span>Уведомлять при отсутствии изменений</span>
-          <input role="switch" type="checkbox" checked={notifyWhenUnchanged} disabled={disabled || !telegramEnabled || telegramPhase === "disabled"} onChange={(event) => onChange({ notifyWhenUnchanged: event.target.checked })} />
+          <input role="switch" type="checkbox" checked={notifyWhenUnchanged} disabled={disabled || !telegramEnabled || telegramPhase !== "enabled"} onChange={(event) => onChange({ notifyWhenUnchanged: event.target.checked })} />
         </label>
       </section>
     </div>
@@ -363,6 +376,14 @@ function systemStatusPresentation(state: HealthState): {
       hint: state.health.telegram.status === "disabled"
         ? "SQLite доступна, уведомления Telegram отключены"
         : "SQLite и Telegram доступны",
+    };
+  }
+  if (state.health.telegram.status === "checking") {
+    return {
+      tone: "loading",
+      ariaLabel: "Проверяется доступность Telegram",
+      shortLabel: "Проверяем",
+      hint: "Проверяем доступность Telegram",
     };
   }
   return {

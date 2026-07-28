@@ -14,6 +14,8 @@ import {
 export interface TelegramChannelState { status: "available" | "unavailable"; reason: string | null }
 export interface TelegramDispatcher {
   initialize(): Promise<void>; recheck(): Promise<TelegramChannelState>;
+  checkAvailability(): Promise<TelegramChannelState>;
+  applyAvailability(state: TelegramChannelState): void;
   ensureAvailable(): Promise<boolean>; drain(): Promise<void>; stop(timeoutMs?: number): Promise<void>;
   state(): TelegramChannelState;
 }
@@ -49,6 +51,7 @@ export function createTelegramDispatcher(options: {
   logger?: NdjsonLogger;
   detailPreparation?: Partial<DetailPreparation>;
   canDispatch?: () => boolean;
+  inspectAvailability?: () => Promise<TelegramChannelState>;
 }): TelegramDispatcher {
   const bootId = randomUUID(); const now = options.now ?? (() => new Date());
   const detailPreparation: DetailPreparation = {
@@ -61,6 +64,7 @@ export function createTelegramDispatcher(options: {
   let channelState: TelegramChannelState = { status: "unavailable", reason: "Telegram не настроен." };
   let dispatchTail = Promise.resolve(); let stopping = false;
   async function inspectAvailability(): Promise<TelegramChannelState> {
+    if (options.inspectAvailability !== undefined) return options.inspectAvailability();
     return inspectTelegramExecutable(executablePath(), {
       ...(options.availabilityDeadlineMs === undefined ? {} : { deadlineMs: options.availabilityDeadlineMs }),
       ...(options.argsPrefix === undefined ? {} : { argsPrefix: options.argsPrefix }),
@@ -89,6 +93,11 @@ export function createTelegramDispatcher(options: {
   return {
     async initialize() { channelState = await inspectAvailability(); options.store.beginTelegramSession(bootId, channelState.status === "available", now().toISOString()); },
     async recheck() { channelState = await inspectAvailability(); options.store.setTelegramAvailable(channelState.status === "available", now().toISOString()); return channelState; },
+    checkAvailability: inspectAvailability,
+    applyAvailability(state) {
+      channelState = state;
+      options.store.setTelegramAvailable(state.status === "available", now().toISOString());
+    },
     async ensureAvailable() { if (channelState.status === "unavailable") await this.recheck(); return channelState.status === "available"; },
     drain() { const work = dispatchTail.then(drainOnce); dispatchTail = work.catch(() => undefined); return work; },
     async stop(timeoutMs = 8_000) {

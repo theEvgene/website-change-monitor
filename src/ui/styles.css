@@ -662,6 +662,11 @@ main {
   box-shadow: 0 0 0 4px #fff0c8;
 }
 
+.component-dot--loading {
+  background: #64748b;
+  box-shadow: 0 0 0 4px #e2e8f0;
+}
+
 .component-card--disabled {
   color: #64748b;
   background: #f1f5f9;

@@ -208,6 +208,7 @@ export interface MonitorStore {
   listNotifications(afterId?: number): NotificationFeed;
   listLiveNotifications(afterId?: number): NotificationFeed;
   beginTelegramSession(bootId: string, available: boolean, now: string): void;
+  beginTelegramAvailabilityCheck(): void;
   disablePendingTelegramDeliveries(now: string): void;
   setTelegramAvailable(available: boolean, now: string): void;
   claimTelegramDelivery(bootId: string, now: string): TelegramDeliveryJob | undefined;
@@ -1154,6 +1155,9 @@ export function createMonitorStore(
         database.prepare(`UPDATE notification_deliveries SET state = 'abandoned', failure_reason = 'Приложение было перезапущено.', updated_at = ? WHERE state IN ('pending','sending')`).run(now);
         telegramBootId = bootId; telegramAvailable = available;
       })();
+    },
+    beginTelegramAvailabilityCheck() {
+      telegramAvailable = true;
     },
     disablePendingTelegramDeliveries(now) {
       database.prepare(`

@@ -136,7 +136,7 @@ describe("disabled Telegram deliveries", () => {
     try {
       database.monitors.beginTelegramSession("current-boot", false, now);
       seedChange(database, "Old unavailable", true, now);
-      database.monitors.beginTelegramAvailabilityCheck();
+      database.monitors.preparePendingTelegramDeliveriesForAvailabilityCheck();
       seedChange(database, "Waiting for check", true, now);
 
       expect(database.monitors.listNotifications().items.map((event) => event.telegram.state)).toEqual([

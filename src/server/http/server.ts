@@ -120,6 +120,15 @@ export function buildHttpServer(
   });
   let workerTimer: ReturnType<typeof setInterval> | undefined;
   const notificationStreams = new Set<ServerResponse>();
+  const publicTelegramState = () => {
+    const settings = notificationSettings.state();
+    if (settings.telegramPhase === "checking") {
+      return { status: "checking" as const, reason: null };
+    }
+    return settings.telegramEnabled
+      ? telegram.state()
+      : { status: "disabled" as const, reason: null };
+  };
 
   server.addHook("onReady", async () => {
     await telegram.initialize();
@@ -238,12 +247,7 @@ export function buildHttpServer(
 
     apiServer.get("/api/health", { schema: healthRouteSchema }, async () => {
       const database = options.database.diagnostics();
-      const settings = notificationSettings.state();
-      const telegramState = settings.telegramPhase === "checking"
-        ? { status: "checking" as const, reason: null }
-        : settings.telegramEnabled
-          ? telegram.state()
-        : { status: "disabled" as const, reason: null };
+      const telegramState = publicTelegramState();
       return {
         application: applicationId,
         status: telegramState.status === "available" || telegramState.status === "disabled" ? "ready" as const : "degraded" as const,
@@ -256,11 +260,7 @@ export function buildHttpServer(
       };
     });
 
-    apiServer.get("/api/telegram", { schema: getTelegramStateRouteSchema }, async () => (
-      notificationSettings.state().telegramPhase === "checking"
-        ? { status: "checking" as const, reason: null }
-        : notificationSettings.state().telegramEnabled ? telegram.state() : { status: "disabled" as const, reason: null }
-    ));
+    apiServer.get("/api/telegram", { schema: getTelegramStateRouteSchema }, async () => publicTelegramState());
     apiServer.post("/api/telegram/recheck", { schema: recheckTelegramRouteSchema }, async () => (
       notificationSettings.state().telegramEnabled ? telegram.recheck() : { status: "disabled" as const, reason: null }
     ));
@@ -268,7 +268,7 @@ export function buildHttpServer(
     apiServer.put<{ Body: { telegramEnabled?: boolean; notifyWhenUnchanged?: boolean } }>("/api/settings/notifications", { schema: updateNotificationSettingsRouteSchema }, async (request) => {
       const update = notificationSettings.update(request.body, new Date().toISOString());
       if (update.checkGeneration !== undefined) {
-        options.database.monitors.beginTelegramAvailabilityCheck();
+        options.database.monitors.preparePendingTelegramDeliveriesForAvailabilityCheck();
         void completeTelegramEnable(update.checkGeneration);
       }
       return update.settings;

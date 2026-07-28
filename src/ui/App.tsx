@@ -217,6 +217,7 @@ export function App() {
   }
 
   async function changeNotificationSetting(patch: { telegramEnabled?: boolean; notifyWhenUnchanged?: boolean }) {
+    const confirmed = { telegramEnabled, notifyWhenUnchanged, telegramPhase, healthState: state };
     setNotificationSettingsBusy(true);
     try {
       const response = await fetch("/api/settings/notifications", {
@@ -228,6 +229,18 @@ export function App() {
       setTelegramEnabled(settings.telegramEnabled);
       setNotifyWhenUnchanged(settings.notifyWhenUnchanged);
       setTelegramPhase(settings.telegramPhase);
+      if (settings.telegramPhase === "checking") {
+        setState((current) => current.kind === "loaded"
+          ? {
+              ...current,
+              health: {
+                ...current.health,
+                status: "degraded",
+                telegram: { status: "checking", reason: null },
+              },
+            }
+          : current);
+      }
       while (settings.telegramPhase === "checking") {
         await new Promise((resolve) => window.setTimeout(resolve, 200));
         const settingsResponse = await fetch("/api/settings/notifications", { headers: { accept: "application/json" } });
@@ -243,6 +256,10 @@ export function App() {
         setState((current) => current.kind === "loaded" ? { ...current, health } : current);
       }
     } catch {
+      setTelegramEnabled(confirmed.telegramEnabled);
+      setNotifyWhenUnchanged(confirmed.notifyWhenUnchanged);
+      setTelegramPhase(confirmed.telegramPhase);
+      setState(confirmed.healthState);
       setOperationToast({ tone: "error", message: "Не удалось изменить настройки." });
     } finally { setNotificationSettingsBusy(false); }
   }

@@ -99,6 +99,135 @@ describe("startup UI", () => {
     expect(telegramSwitch).toBeChecked();
   });
 
+  it("polls a re-enable check and unlocks the dependent setting after an unavailable result", async () => {
+    let settingsReads = 0;
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (input === "/api/version") return Promise.resolve(Response.json({
+        application: "website-change-monitor", apiVersion: "v1", version: "0.1.0",
+      }));
+      if (input === "/api/settings/notifications") {
+        if (init?.method === "PUT") {
+          return Promise.resolve(Response.json({
+            telegramEnabled: true,
+            notifyWhenUnchanged: false,
+            telegramPhase: "checking",
+          }));
+        }
+        settingsReads += 1;
+        return Promise.resolve(Response.json(settingsReads === 1
+          ? { telegramEnabled: false, notifyWhenUnchanged: false, telegramPhase: "disabled" }
+          : { telegramEnabled: true, notifyWhenUnchanged: false, telegramPhase: "enabled" }));
+      }
+      return Promise.resolve(Response.json({
+        application: "website-change-monitor", status: "degraded", version: "0.1.0",
+        database: { status: "ready", schemaVersion: 11 },
+        telegram: { status: "unavailable", reason: "Telegram unavailable" },
+      }));
+    }));
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Настройки" }));
+    const telegramSwitch = screen.getByRole("switch", { name: "Отправлять уведомления в Telegram" });
+    const controlSwitch = screen.getByRole("switch", { name: "Уведомлять при отсутствии изменений" });
+    expect(telegramSwitch).not.toBeChecked();
+    fireEvent.click(telegramSwitch);
+    expect(telegramSwitch).toBeDisabled();
+    expect(controlSwitch).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "Проверяется доступность Telegram" })).toBeVisible();
+
+    await waitFor(() => {
+      expect(telegramSwitch).toBeChecked();
+      expect(telegramSwitch).not.toBeDisabled();
+    }, { timeout: 1_500 });
+    expect(controlSwitch).not.toBeDisabled();
+    expect(controlSwitch).not.toBeChecked();
+  });
+
+  it("restores the last confirmed settings when polling a re-enable check fails", async () => {
+    let settingsReads = 0;
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (input === "/api/version") return Promise.resolve(Response.json({
+        application: "website-change-monitor", apiVersion: "v1", version: "0.1.0",
+      }));
+      if (input === "/api/settings/notifications") {
+        if (init?.method === "PUT") {
+          return Promise.resolve(Response.json({
+            telegramEnabled: true,
+            notifyWhenUnchanged: false,
+            telegramPhase: "checking",
+          }));
+        }
+        settingsReads += 1;
+        return Promise.resolve(settingsReads === 1
+          ? Response.json({ telegramEnabled: false, notifyWhenUnchanged: false, telegramPhase: "disabled" })
+          : new Response(null, { status: 503 }));
+      }
+      return Promise.resolve(Response.json({
+        application: "website-change-monitor", status: "ready", version: "0.1.0",
+        database: { status: "ready", schemaVersion: 11 },
+        telegram: { status: "disabled", reason: null },
+      }));
+    }));
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Настройки" }));
+    const telegramSwitch = screen.getByRole("switch", { name: "Отправлять уведомления в Telegram" });
+    fireEvent.click(telegramSwitch);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось изменить настройки.");
+    await waitFor(() => {
+      expect(telegramSwitch).not.toBeChecked();
+      expect(telegramSwitch).not.toBeDisabled();
+    });
+    expect(screen.getByRole("switch", { name: "Уведомлять при отсутствии изменений" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Система работает" })).toBeVisible();
+  });
+
+  it("restores the last confirmed state when the final health refresh fails", async () => {
+    let settingsReads = 0;
+    let healthReads = 0;
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (input === "/api/version") return Promise.resolve(Response.json({
+        application: "website-change-monitor", apiVersion: "v1", version: "0.1.0",
+      }));
+      if (input === "/api/settings/notifications") {
+        if (init?.method === "PUT") {
+          return Promise.resolve(Response.json({
+            telegramEnabled: true,
+            notifyWhenUnchanged: false,
+            telegramPhase: "checking",
+          }));
+        }
+        settingsReads += 1;
+        return Promise.resolve(Response.json(settingsReads === 1
+          ? { telegramEnabled: false, notifyWhenUnchanged: false, telegramPhase: "disabled" }
+          : { telegramEnabled: true, notifyWhenUnchanged: false, telegramPhase: "enabled" }));
+      }
+      if (input === "/api/health") {
+        healthReads += 1;
+        return Promise.resolve(healthReads === 1
+          ? Response.json({
+              application: "website-change-monitor", status: "ready", version: "0.1.0",
+              database: { status: "ready", schemaVersion: 11 },
+              telegram: { status: "disabled", reason: null },
+            })
+          : new Response(null, { status: 503 }));
+      }
+      return Promise.resolve(Response.json([]));
+    }));
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Настройки" }));
+    const telegramSwitch = screen.getByRole("switch", { name: "Отправлять уведомления в Telegram" });
+    fireEvent.click(telegramSwitch);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось изменить настройки.");
+    await waitFor(() => {
+      expect(telegramSwitch).not.toBeChecked();
+      expect(telegramSwitch).not.toBeDisabled();
+    });
+    expect(screen.getByRole("button", { name: "Система работает" })).toBeVisible();
+  });
+
   it("shows the health reported by the local application", async () => {
     const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       if (input === "/api/version") {

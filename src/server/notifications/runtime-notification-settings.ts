@@ -4,17 +4,22 @@ import {
 } from "../persistence/monitor-store.js";
 
 export interface RuntimeNotificationSettings extends NotificationPolicy {
-  telegramPhase: "enabled" | "disabled";
+  telegramPhase: "checking" | "enabled" | "disabled";
 }
 
 export interface RuntimeNotificationSettingsController {
   state(): RuntimeNotificationSettings;
-  update(patch: Partial<NotificationPolicy>, now: string): RuntimeNotificationSettings;
+  update(patch: Partial<NotificationPolicy>, now: string): {
+    settings: RuntimeNotificationSettings;
+    checkGeneration?: number;
+  };
+  completeCheck(generation: number): RuntimeNotificationSettings | undefined;
 }
 
 export function createRuntimeNotificationSettings(options: {
   disablePendingTelegramDeliveries(now: string): void;
 }): RuntimeNotificationSettingsController {
+  let generation = 0;
   let current: RuntimeNotificationSettings = {
     ...defaultNotificationPolicy,
     telegramPhase: "enabled",
@@ -28,13 +33,34 @@ export function createRuntimeNotificationSettings(options: {
         ? (patch.notifyWhenUnchanged ?? current.notifyWhenUnchanged)
         : false;
       if (!telegramEnabled && current.telegramEnabled) {
+        generation += 1;
         options.disablePendingTelegramDeliveries(now);
       }
+      const startsCheck = telegramEnabled && !current.telegramEnabled;
+      if (startsCheck) generation += 1;
       current = {
         telegramEnabled,
         notifyWhenUnchanged,
-        telegramPhase: telegramEnabled ? "enabled" : "disabled",
+        telegramPhase: startsCheck
+          ? "checking"
+          : telegramEnabled
+            ? current.telegramPhase === "checking" ? "checking" : "enabled"
+            : "disabled",
       };
+      return {
+        settings: current,
+        ...(startsCheck ? { checkGeneration: generation } : {}),
+      };
+    },
+    completeCheck(checkGeneration) {
+      if (
+        checkGeneration !== generation ||
+        !current.telegramEnabled ||
+        current.telegramPhase !== "checking"
+      ) {
+        return undefined;
+      }
+      current = { ...current, telegramPhase: "enabled" };
       return current;
     },
   };

@@ -26,6 +26,8 @@ import {
   apiVersion,
   applicationId,
   comparisonResponseSchemaV1,
+  checkDiagnosticSchemaV1,
+  checkDiagnosticResponseSchemaV1,
   checkIntentSchemaV1,
   checkIntentListResponseSchemaV1,
   notificationEventSchemaV1,
@@ -35,6 +37,7 @@ import {
   createMonitorRouteSchema,
   getMonitorRouteSchema,
   getComparisonRouteSchema,
+  getCheckDiagnosticRouteSchema,
   healthResponseSchemaV1,
   healthRouteSchema,
   listMonitorChecksRouteSchema,
@@ -117,6 +120,7 @@ export function buildHttpServer(
       if (notificationSettings.state().telegramPhase === "enabled") void telegram.drain();
     },
     notificationPolicy: () => notificationSettings.state(),
+    ...(options.logger === undefined ? {} : { logger: options.logger }),
   });
   let workerTimer: ReturnType<typeof setInterval> | undefined;
   const notificationStreams = new Set<ServerResponse>();
@@ -237,6 +241,8 @@ export function buildHttpServer(
     apiServer.addSchema(journalCheckSchemaV1);
     apiServer.addSchema(journalResponseSchemaV1);
     apiServer.addSchema(comparisonResponseSchemaV1);
+    apiServer.addSchema(checkDiagnosticSchemaV1);
+    apiServer.addSchema(checkDiagnosticResponseSchemaV1);
     apiServer.addSchema(checkIntentSchemaV1);
     apiServer.addSchema(checkIntentListResponseSchemaV1);
     apiServer.addSchema(notificationEventSchemaV1);
@@ -555,6 +561,20 @@ export function buildHttpServer(
         timer.unref();
         request.raw.on("close", () => { clearInterval(timer); notificationStreams.delete(reply.raw); });
         return reply;
+      },
+    );
+
+    apiServer.get<{ Params: { checkId: number } }>(
+      "/api/checks/:checkId/diagnostics",
+      { schema: getCheckDiagnosticRouteSchema },
+      async (request, reply) => {
+        const diagnostic = monitors.getCheckDiagnostic(request.params.checkId);
+        if (diagnostic === undefined) {
+          return reply
+            .code(404)
+            .send(apiError("not_found", "Проверка не найдена."));
+        }
+        return diagnostic;
       },
     );
 

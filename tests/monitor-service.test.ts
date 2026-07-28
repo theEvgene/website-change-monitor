@@ -429,6 +429,16 @@ describe("Monitor use case", () => {
         snapshot: expect.objectContaining({ id: 1 }),
       }),
     ]);
+    const snapshotFailure = recovered!.history.find(
+      (check) => check.errorCode === "snapshot_invalid",
+    )!;
+    expect(service.getCheckDiagnostic(snapshotFailure.id)).toMatchObject({
+      availability: "available",
+      diagnostic: {
+        stage: "snapshot",
+        finalUrl: "https://example.com/catalog",
+      },
+    });
   });
 
   it("rolls back a partially completed Change transaction and keeps the previous baseline", async () => {
@@ -859,12 +869,22 @@ describe("Monitor use case", () => {
     });
     await service.runAvailableChecks();
 
-    expect(service.getMonitor(monitorId)).toMatchObject({
+    const recoveredMonitor = service.getMonitor(monitorId)!;
+    expect(recoveredMonitor).toMatchObject({
       nextCheckAt: "2026-07-17T08:06:00.000Z",
       activeIntent: { kind: "retry", state: "queued" },
       history: [{
         result: "error", errorCode: "application_shutdown", isFinalError: false,
       }],
+    });
+    expect(
+      service.getCheckDiagnostic(recoveredMonitor.history[0]!.id),
+    ).toMatchObject({
+      availability: "available",
+      diagnostic: {
+        stage: "application",
+        totalMs: 300_000,
+      },
     });
     expect(reopened.monitors.listActiveIntents()).toHaveLength(1);
   });

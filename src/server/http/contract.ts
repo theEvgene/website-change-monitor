@@ -1,6 +1,7 @@
 import type { FastifySchema } from "fastify";
 
 import { pageProbeErrorCodes } from "../application/page-probe.js";
+import { checkDiagnosticStages } from "../domain/check-diagnostic.js";
 
 export const applicationId = "website-change-monitor";
 export const apiVersion = "v1";
@@ -577,6 +578,51 @@ export const comparisonResponseSchemaV1 = {
   },
 } as const;
 
+export const checkDiagnosticSchemaV1 = {
+  $id: "CheckDiagnosticV1",
+  type: "object",
+  additionalProperties: false,
+  required: ["checkId", "recordedAt", "stage", "totalMs"],
+  properties: {
+    checkId: { type: "integer", minimum: 1 },
+    recordedAt: { type: "string", format: "date-time" },
+    stage: { type: "string", enum: checkDiagnosticStages },
+    finalUrl: { type: "string", format: "uri", maxLength: 2048 },
+    httpStatus: { type: "integer", minimum: 100, maximum: 599 },
+    totalMs: { type: "integer", minimum: 0, maximum: 86400000 },
+    navigationMs: { type: "integer", minimum: 0, maximum: 86400000 },
+    targetMs: { type: "integer", minimum: 0, maximum: 86400000 },
+    scrollMs: { type: "integer", minimum: 0, maximum: 86400000 },
+    stabilityMs: { type: "integer", minimum: 0, maximum: 86400000 },
+    extractionMs: { type: "integer", minimum: 0, maximum: 86400000 },
+    selectorField: {
+      type: "string",
+      enum: ["targetSelectors", "exclusionSelectors"],
+    },
+    selectorIndex: { type: "integer", minimum: 0 },
+  },
+} as const;
+
+export const checkDiagnosticResponseSchemaV1 = {
+  $id: "CheckDiagnosticResponseV1",
+  type: "object",
+  additionalProperties: false,
+  required: ["checkId", "availability", "diagnostic"],
+  properties: {
+    checkId: { type: "integer", minimum: 1 },
+    availability: {
+      type: "string",
+      enum: ["available", "not_applicable", "unavailable"],
+    },
+    diagnostic: {
+      anyOf: [
+        { $ref: "CheckDiagnosticV1#" },
+        { type: "null" },
+      ],
+    },
+  },
+} as const;
+
 const commonErrors = {
   403: { $ref: "ApiErrorV1#" },
   421: { $ref: "ApiErrorV1#" },
@@ -784,6 +830,17 @@ export const getComparisonRouteSchema: FastifySchema = {
   params: checkIdParams,
   response: {
     200: { $ref: "ComparisonResponseV1#" },
+    404: { $ref: "ApiErrorV1#" },
+    ...commonErrors,
+  },
+};
+
+export const getCheckDiagnosticRouteSchema: FastifySchema = {
+  operationId: "getCheckDiagnostic",
+  summary: "Получить Диагностику Проверки",
+  params: checkIdParams,
+  response: {
+    200: { $ref: "CheckDiagnosticResponseV1#" },
     404: { $ref: "ApiErrorV1#" },
     ...commonErrors,
   },

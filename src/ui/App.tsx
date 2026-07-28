@@ -251,10 +251,9 @@ export function App() {
         setTelegramPhase(settings.telegramPhase);
       }
       const healthResponse = await fetch("/api/health", { headers: { accept: "application/json" } });
-      if (healthResponse.ok) {
-        const health = await healthResponse.json() as HealthResponse;
-        setState((current) => current.kind === "loaded" ? { ...current, health } : current);
-      }
+      if (!healthResponse.ok) throw new Error(`Health refresh failed: ${healthResponse.status}`);
+      const health = await healthResponse.json() as HealthResponse;
+      setState((current) => current.kind === "loaded" ? { ...current, health } : current);
     } catch {
       setTelegramEnabled(confirmed.telegramEnabled);
       setNotifyWhenUnchanged(confirmed.notifyWhenUnchanged);

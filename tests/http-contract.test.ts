@@ -99,6 +99,7 @@ describe("public HTTP contract", () => {
       "MonitorUpdateRequestV1",
       "NotificationEventV1",
       "NotificationFeedV1",
+      "NotificationSettingsUpdateV1",
       "NotificationSettingsV1",
       "PreviewRequestV1",
       "PreviewResponseV1",

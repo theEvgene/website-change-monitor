@@ -48,6 +48,7 @@ export function createTelegramDispatcher(options: {
   availabilityDeadlineMs?: number; now?: () => Date; argsPrefix?: string[]; environment?: NodeJS.ProcessEnv;
   logger?: NdjsonLogger;
   detailPreparation?: Partial<DetailPreparation>;
+  canDispatch?: () => boolean;
 }): TelegramDispatcher {
   const bootId = randomUUID(); const now = options.now ?? (() => new Date());
   const detailPreparation: DetailPreparation = {
@@ -67,8 +68,9 @@ export function createTelegramDispatcher(options: {
     });
   }
   async function drainOnce(): Promise<void> {
-    if (stopping || channelState.status !== "available") return;
+    if (stopping || channelState.status !== "available" || options.canDispatch?.() === false) return;
     for (;;) {
+      if (options.canDispatch?.() === false) return;
       const path = executablePath();
       if (path === null) return;
       const job = options.store.claimTelegramDelivery(bootId, now().toISOString());

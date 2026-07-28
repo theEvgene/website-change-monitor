@@ -7,21 +7,24 @@ import { describe, expect, it } from "vitest";
 import { openApplicationDatabase } from "../src/server/persistence/database.js";
 
 describe("control notifications", () => {
-  it("uses the persisted commit-time setting, skips the Baseline, and exposes delivery only in Check history", async () => {
+  it("uses the runtime policy at commit, skips the Baseline, and exposes delivery only in Check history", async () => {
     const root = await mkdtemp(join(tmpdir(), "wcm-control-уведомления-"));
     let database = openApplicationDatabase({ rootDirectory: root });
     try {
-      expect(database.monitors.notificationSettings()).toEqual({ notifyWhenUnchanged: false });
       const now = "2026-07-18T08:00:00.000Z";
       const monitorId = database.monitors.createMonitor({ name: "Catalog", url: "https://example.com", targetSelectors: ["body"], exclusionSelectors: [], intervalHours: 6 }, now);
       const baseline = database.monitors.claimNextCheck(now)!;
-      database.monitors.updateNotificationSettings(true);
       database.monitors.completeBaseline(baseline, snapshot(), now, "2026-07-18T14:00:00.000Z");
       expect(database.monitors.listNotifications().items).toEqual([]);
 
       database.monitors.enqueueManualCheck(monitorId, now);
       const enabledAtCommit = database.monitors.claimNextCheck(now)!;
-      database.monitors.completeNoChange(enabledAtCommit, now, "2026-07-18T14:00:00.000Z");
+      database.monitors.completeNoChange(
+        enabledAtCommit,
+        now,
+        "2026-07-18T14:00:00.000Z",
+        { telegramEnabled: true, notifyWhenUnchanged: true },
+      );
       expect(database.monitors.listNotifications().items).toEqual([]);
       expect(database.monitors.listLiveNotifications().items).toMatchObject([{
         kind: "control_check_ok", centerVisible: false, checkId: enabledAtCommit.checkId,
@@ -32,14 +35,15 @@ describe("control notifications", () => {
 
       database.monitors.enqueueManualCheck(monitorId, now);
       const disabledAtCommit = database.monitors.claimNextCheck(now)!;
-      database.monitors.updateNotificationSettings(false);
-      database.monitors.completeNoChange(disabledAtCommit, now, "2026-07-18T14:00:00.000Z");
+      database.monitors.completeNoChange(
+        disabledAtCommit,
+        now,
+        "2026-07-18T14:00:00.000Z",
+        { telegramEnabled: false, notifyWhenUnchanged: false },
+      );
       expect(database.monitors.listNotifications().items).toEqual([]);
       expect(database.monitors.listLiveNotifications().items).toHaveLength(1);
 
-      database.close();
-      database = openApplicationDatabase({ rootDirectory: root });
-      expect(database.monitors.notificationSettings()).toEqual({ notifyWhenUnchanged: false });
     } finally {
       database.close();
       await rm(root, { recursive: true, force: true });

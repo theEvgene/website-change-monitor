@@ -14,6 +14,7 @@ import { notificationsMigration } from "./migrations/007-notifications.js";
 import { telegramDeliveryMigration } from "./migrations/008-telegram-delivery.js";
 import { controlNotificationsMigration } from "./migrations/009-control-notifications.js";
 import { checkUrlMigration } from "./migrations/010-check-url.js";
+import { telegramDisabledDeliveryMigration } from "./migrations/011-telegram-disabled-delivery.js";
 import { createMonitorStore, type MonitorStore } from "./monitor-store.js";
 import { verifyDatabaseFile } from "./maintenance.js";
 import { latestSchemaVersion } from "./schema-version.js";
@@ -59,6 +60,7 @@ const migrations = [
   telegramDeliveryMigration,
   controlNotificationsMigration,
   checkUrlMigration,
+  telegramDisabledDeliveryMigration,
 ];
 
 if (migrations.at(-1)?.version !== latestSchemaVersion) {

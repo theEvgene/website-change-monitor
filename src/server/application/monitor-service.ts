@@ -11,6 +11,7 @@ import type {
   MonitorRecord,
   MonitorSummaryRecord,
   NotificationFeed,
+  NotificationPolicy,
 } from "../persistence/monitor-store.js";
 import type { PagePreview, PageProbe } from "./page-probe.js";
 import { PageProbeError } from "./page-probe.js";
@@ -126,6 +127,7 @@ export function createMonitorService(options: {
   orchestrationTimeoutMs?: number;
   beforeNotificationCommit?: () => Promise<void>;
   afterNotificationCommits?: () => void;
+  notificationPolicy?: () => NotificationPolicy;
 }): MonitorService {
   const clock = options.clock ?? { now: () => new Date() };
   let workerTail: Promise<void> = Promise.resolve();
@@ -134,6 +136,8 @@ export function createMonitorService(options: {
   let stopping = false;
   let discardCurrentResult = false;
   const orchestrationTimeoutMs = options.orchestrationTimeoutMs ?? 75_000;
+  const notificationPolicy = options.notificationPolicy
+    ?? (() => ({ telegramEnabled: true, notifyWhenUnchanged: false }));
 
   async function prepareNotification(): Promise<void> {
     await options.beforeNotificationCommit?.().catch(() => undefined);
@@ -176,6 +180,7 @@ export function createMonitorService(options: {
           { code: result.code, message: result.message },
           completedAt.toISOString(),
           nextCheckAt,
+          notificationPolicy(),
         );
         continue;
       }
@@ -195,6 +200,7 @@ export function createMonitorService(options: {
               claimed,
               completedAt.toISOString(),
               nextCheckAt,
+              notificationPolicy(),
             );
           } else {
             await prepareNotification();
@@ -203,6 +209,7 @@ export function createMonitorService(options: {
               snapshot,
               completedAt.toISOString(),
               nextCheckAt,
+              notificationPolicy(),
             );
           }
         }
@@ -220,6 +227,7 @@ export function createMonitorService(options: {
           { code: failure.code, message: failure.message },
           completedAt.toISOString(),
           nextCheckAt,
+          notificationPolicy(),
         );
       }
       if (stopping) return;

@@ -6,6 +6,14 @@ export type CheckIntentKind = "scheduled" | "overdue" | "manual" | "retry";
 export type CheckStatus = "running" | "succeeded" | "failed";
 export type CheckResult = "baseline" | "no_change" | "change" | "error";
 export type CheckIntentState = "queued" | "running" | "finished" | "cancelled";
+export interface NotificationPolicy {
+  telegramEnabled: boolean;
+  notifyWhenUnchanged: boolean;
+}
+const defaultNotificationPolicy: NotificationPolicy = {
+  telegramEnabled: true,
+  notifyWhenUnchanged: false,
+};
 
 export interface CheckIntentRecord {
   id: number;
@@ -64,7 +72,7 @@ export interface NotificationEventRecord {
   observedAt: string;
   targetPath: string;
   dedupeKey: string;
-  telegram: { state: "pending" | "sending" | "delivered" | "unavailable" | "permanent" | "temporary" | "timeout" | "abandoned"; failureReason: string | null };
+  telegram: { state: "pending" | "sending" | "delivered" | "unavailable" | "permanent" | "temporary" | "timeout" | "abandoned" | "disabled"; failureReason: string | null };
 }
 
 export interface TelegramDeliveryJob {
@@ -174,18 +182,21 @@ export interface MonitorStore {
     claimed: ClaimedCheck,
     completedAt: string,
     nextCheckAt: string,
+    policy: NotificationPolicy,
   ): void;
   completeChange(
     claimed: ClaimedCheck,
     snapshot: SnapshotRecord,
     completedAt: string,
     nextCheckAt: string,
+    policy: NotificationPolicy,
   ): void;
   failCheck(
     claimed: ClaimedCheck,
     error: { code: string; message: string },
     completedAt: string,
     nextCheckAt: string,
+    policy: NotificationPolicy,
   ): void;
   setPaused(monitorId: number, paused: boolean, now: string): boolean | undefined;
   listMonitors(label?: string): MonitorSummaryRecord[];
@@ -196,9 +207,8 @@ export interface MonitorStore {
   getMonitor(id: number): MonitorRecord | undefined;
   listNotifications(afterId?: number): NotificationFeed;
   listLiveNotifications(afterId?: number): NotificationFeed;
-  notificationSettings(): { notifyWhenUnchanged: boolean };
-  updateNotificationSettings(notifyWhenUnchanged: boolean): void;
   beginTelegramSession(bootId: string, available: boolean, now: string): void;
+  disablePendingTelegramDeliveries(now: string): void;
   setTelegramAvailable(available: boolean, now: string): void;
   claimTelegramDelivery(bootId: string, now: string): TelegramDeliveryJob | undefined;
   finishTelegramDelivery(deliveryId: number, state: "delivered" | "permanent" | "temporary" | "timeout", failureReason: string | null, diagnostic: string | null, now: string): void;
@@ -509,6 +519,7 @@ export function createMonitorStore(
   function recordNotification(
     claimed: Pick<ClaimedCheck, "monitorId" | "monitorName" | "url" | "scopeRevision" | "checkId" | "chainCheckId">,
     completedAt: string,
+    telegramEnabled: boolean,
     event: Pick<NotificationEventRecord, "kind" | "centerVisible" | "title" | "body" | "targetPath" | "dedupeKey">,
   ): void {
     const inserted = insertNotification.run({
@@ -524,13 +535,13 @@ export function createMonitorStore(
     });
     insertTelegramDelivery.run(
       Number(inserted.lastInsertRowid), telegramBootId,
-      telegramAvailable ? "pending" : "unavailable",
-      telegramAvailable ? null : "Канал Telegram недоступен.", completedAt, completedAt,
+      telegramEnabled ? (telegramAvailable ? "pending" : "unavailable") : "disabled",
+      telegramEnabled && !telegramAvailable ? "Канал Telegram недоступен." : null, completedAt, completedAt,
     );
   }
 
-  function recordChangeNotification(claimed: ClaimedCheck, completedAt: string): void {
-    recordNotification(claimed, completedAt, {
+  function recordChangeNotification(claimed: ClaimedCheck, completedAt: string, telegramEnabled: boolean): void {
+    recordNotification(claimed, completedAt, telegramEnabled, {
       kind: "change_detected", centerVisible: true, title: "Обнаружено изменение",
       body: `Монитор «${claimed.monitorName}»: страница изменилась.`,
       targetPath: `/?section=notifications&check=${claimed.checkId}`,
@@ -542,8 +553,9 @@ export function createMonitorStore(
     claimed: Pick<ClaimedCheck, "monitorId" | "monitorName" | "url" | "scopeRevision" | "checkId" | "chainCheckId">,
     completedAt: string,
     errorMessage: string,
+    telegramEnabled: boolean,
   ): void {
-    recordNotification(claimed, completedAt, {
+    recordNotification(claimed, completedAt, telegramEnabled, {
       kind: "check_failed_final", centerVisible: true, title: "Проверка завершилась ошибкой",
       body: `Монитор «${claimed.monitorName}»: ${errorMessage}`,
       targetPath: `/?section=journal&check=${claimed.checkId}`,
@@ -551,8 +563,8 @@ export function createMonitorStore(
     });
   }
 
-  function recordControlNotification(claimed: ClaimedCheck, completedAt: string): void {
-    recordNotification(claimed, completedAt, {
+  function recordControlNotification(claimed: ClaimedCheck, completedAt: string, telegramEnabled: boolean): void {
+    recordNotification(claimed, completedAt, telegramEnabled, {
       kind: "control_check_ok", centerVisible: false,
       title: "Проверка завершена без изменений",
       body: `Монитор «${claimed.monitorName}»: изменений не обнаружено.`,
@@ -629,7 +641,7 @@ export function createMonitorStore(
   );
 
   const completeNoChangeTransaction = database.transaction(
-    (claimed: ClaimedCheck, completedAt: string, nextCheckAt: string) => {
+    (claimed: ClaimedCheck, completedAt: string, nextCheckAt: string, policy: NotificationPolicy = defaultNotificationPolicy) => {
       if (claimed.currentSnapshot === null) {
         throw new Error("No current Snapshot for no-change result");
       }
@@ -643,8 +655,7 @@ export function createMonitorStore(
         ).changes,
       );
       assertChanged(finishIntent.run(completedAt, claimed.intentId).changes);
-      const settings = database.prepare("SELECT notify_when_unchanged FROM application_settings WHERE id = 1").get() as { notify_when_unchanged: 0 | 1 };
-      if (settings.notify_when_unchanged === 1) recordControlNotification(claimed, completedAt);
+      if (policy.notifyWhenUnchanged) recordControlNotification(claimed, completedAt, policy.telegramEnabled);
       replaceOrdinarySchedule(claimed, completedAt, nextCheckAt);
     },
   );
@@ -655,6 +666,7 @@ export function createMonitorStore(
       snapshot: SnapshotRecord,
       completedAt: string,
       nextCheckAt: string,
+      policy: NotificationPolicy = defaultNotificationPolicy,
     ) => {
       if (claimed.currentSnapshot === null) {
         throw new Error("No current Snapshot for Change result");
@@ -687,7 +699,7 @@ export function createMonitorStore(
       );
       assertChanged(finishIntent.run(completedAt, claimed.intentId).changes);
       replaceOrdinarySchedule(claimed, completedAt, nextCheckAt);
-      recordChangeNotification(claimed, completedAt);
+      recordChangeNotification(claimed, completedAt, policy.telegramEnabled);
     },
   );
 
@@ -697,6 +709,7 @@ export function createMonitorStore(
     error: { code: string; message: string },
     completedAt: string,
     nextCheckAt: string,
+    policy: NotificationPolicy = defaultNotificationPolicy,
   ): void {
     const finalError = identity.kind === "retry";
     assertChanged(failCheckStatement.run(
@@ -712,7 +725,7 @@ export function createMonitorStore(
       assertChanged(scheduleMonitor.run(
         nextCheckAt, completedAt, identity.monitorId, identity.scopeRevision,
       ).changes);
-      recordFinalErrorNotification(identity, completedAt, error.message);
+      recordFinalErrorNotification(identity, completedAt, error.message, policy.telegramEnabled);
       return;
     }
     const retryAt = new Date(new Date(completedAt).getTime() + 60_000).toISOString();
@@ -817,6 +830,7 @@ export function createMonitorStore(
         },
         now,
         nextAt,
+        { telegramEnabled: true, notifyWhenUnchanged: false },
       );
     }
   });
@@ -1135,18 +1149,18 @@ export function createMonitorStore(
     listLiveNotifications(afterId = 0) {
       return notificationFeed(afterId, false);
     },
-    notificationSettings() {
-      const row = database.prepare("SELECT notify_when_unchanged FROM application_settings WHERE id = 1").get() as { notify_when_unchanged: 0 | 1 };
-      return { notifyWhenUnchanged: row.notify_when_unchanged === 1 };
-    },
-    updateNotificationSettings(notifyWhenUnchanged) {
-      assertChanged(database.prepare("UPDATE application_settings SET notify_when_unchanged = ? WHERE id = 1").run(notifyWhenUnchanged ? 1 : 0).changes);
-    },
     beginTelegramSession(bootId, available, now) {
       database.transaction(() => {
         database.prepare(`UPDATE notification_deliveries SET state = 'abandoned', failure_reason = 'Приложение было перезапущено.', updated_at = ? WHERE state IN ('pending','sending')`).run(now);
         telegramBootId = bootId; telegramAvailable = available;
       })();
+    },
+    disablePendingTelegramDeliveries(now) {
+      database.prepare(`
+        UPDATE notification_deliveries
+        SET state = 'disabled', failure_reason = NULL, diagnostic = NULL, updated_at = ?
+        WHERE boot_id = ? AND state = 'pending'
+      `).run(now, telegramBootId);
     },
     setTelegramAvailable(available, now) {
       telegramAvailable = available;

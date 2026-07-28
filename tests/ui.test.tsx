@@ -20,6 +20,59 @@ describe("startup UI", () => {
     vi.unstubAllGlobals();
   });
 
+  it("disables Telegram from Settings and presents it as a neutral system state", async () => {
+    let settings = { telegramEnabled: true, notifyWhenUnchanged: false, telegramPhase: "enabled" as const };
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (input === "/api/version") return Promise.resolve(Response.json({
+        application: "website-change-monitor", apiVersion: "v1", version: "0.1.0",
+      }));
+      if (input === "/api/settings/notifications") {
+        if (init?.method === "PUT") {
+          const patch = JSON.parse(String(init.body)) as { telegramEnabled?: boolean; notifyWhenUnchanged?: boolean };
+          const telegramEnabled = patch.telegramEnabled ?? settings.telegramEnabled;
+          settings = {
+            telegramEnabled,
+            notifyWhenUnchanged: telegramEnabled ? (patch.notifyWhenUnchanged ?? settings.notifyWhenUnchanged) : false,
+            telegramPhase: telegramEnabled ? "enabled" : "disabled",
+          };
+        }
+        return Promise.resolve(Response.json(settings));
+      }
+      if (input === "/api/telegram") {
+        return Promise.resolve(Response.json(settings.telegramEnabled
+          ? { status: "available", reason: null }
+          : { status: "disabled", reason: null }));
+      }
+      return Promise.resolve(Response.json({
+        application: "website-change-monitor",
+        status: "ready",
+        version: "0.1.0",
+        database: { status: "ready", schemaVersion: 11 },
+        telegram: settings.telegramEnabled
+          ? { status: "available", reason: null }
+          : { status: "disabled", reason: null },
+      }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Настройки" }));
+    const telegramSwitch = screen.getByRole("switch", { name: "Отправлять уведомления в Telegram" });
+    const controlSwitch = screen.getByRole("switch", { name: "Уведомлять при отсутствии изменений" });
+    expect(telegramSwitch).toBeChecked();
+    fireEvent.click(telegramSwitch);
+    await waitFor(() => expect(telegramSwitch).not.toBeChecked());
+    expect(controlSwitch).not.toBeChecked();
+    expect(controlSwitch).toBeDisabled();
+
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Настройки" })).getByRole("button", { name: "Закрыть" }));
+    fireEvent.click(screen.getByRole("button", { name: "Система работает" }));
+    const status = screen.getByRole("dialog", { name: "Состояние системы" });
+    expect(status).toHaveTextContent("Telegram отключён");
+    expect(status).toHaveTextContent("Уведомления через Telegram отключены в настройках.");
+    expect(within(status).queryByRole("button", { name: "Проверить снова" })).not.toBeInTheDocument();
+  });
+
   it("shows the health reported by the local application", async () => {
     const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       if (input === "/api/version") {

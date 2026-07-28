@@ -95,7 +95,7 @@ export const healthResponseSchemaV1 = {
       type: "object",
       additionalProperties: false,
       required: ["status", "reason"],
-      properties: { status: { enum: ["available", "unavailable"], type: "string" }, reason: { type: ["string", "null"] } },
+      properties: { status: { enum: ["available", "unavailable", "disabled"], type: "string" }, reason: { type: ["string", "null"] } },
     },
   },
 } as const;
@@ -103,7 +103,7 @@ export const healthResponseSchemaV1 = {
 export const telegramStateSchemaV1 = {
   $id: "TelegramStateV1", type: "object", additionalProperties: false,
   required: ["status", "reason"], properties: {
-    status: { enum: ["available", "unavailable"], type: "string" },
+    status: { enum: ["available", "unavailable", "disabled"], type: "string" },
     reason: { type: ["string", "null"] },
   },
 } as const;
@@ -267,7 +267,7 @@ const snapshotMetadataProperties = {
 
 const telegramDeliveryObjectSchema = {
   type: "object", additionalProperties: false, required: ["state", "failureReason"], properties: {
-    state: { enum: ["pending", "sending", "delivered", "unavailable", "permanent", "temporary", "timeout", "abandoned"], type: "string" },
+    state: { enum: ["pending", "sending", "delivered", "unavailable", "permanent", "temporary", "timeout", "abandoned", "disabled"], type: "string" },
     failureReason: { type: ["string", "null"] },
   },
 } as const;
@@ -504,7 +504,19 @@ export const journalCheckSchemaV1 = {
 
 export const notificationSettingsSchemaV1 = {
   $id: "NotificationSettingsV1", type: "object", additionalProperties: false,
-  required: ["notifyWhenUnchanged"], properties: { notifyWhenUnchanged: { type: "boolean" } },
+  required: ["telegramEnabled", "notifyWhenUnchanged", "telegramPhase"], properties: {
+    telegramEnabled: { type: "boolean" },
+    notifyWhenUnchanged: { type: "boolean" },
+    telegramPhase: { enum: ["enabled", "disabled"], type: "string" },
+  },
+} as const;
+
+export const notificationSettingsUpdateSchemaV1 = {
+  $id: "NotificationSettingsUpdateV1", type: "object", additionalProperties: false, minProperties: 1,
+  properties: {
+    telegramEnabled: { type: "boolean" },
+    notifyWhenUnchanged: { type: "boolean" },
+  },
 } as const;
 
 export const journalResponseSchemaV1 = {
@@ -762,7 +774,7 @@ export const getNotificationSettingsRouteSchema: FastifySchema = {
 };
 export const updateNotificationSettingsRouteSchema: FastifySchema = {
   operationId: "updateNotificationSettings", summary: "Изменить настройки Уведомлений",
-  body: { $ref: "NotificationSettingsV1#" },
+  body: { $ref: "NotificationSettingsUpdateV1#" },
   response: { 200: { $ref: "NotificationSettingsV1#" }, 400: { $ref: "ApiErrorV1#" }, ...commonErrors },
 };
 

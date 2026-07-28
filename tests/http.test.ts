@@ -84,6 +84,22 @@ describe("local HTTP server", () => {
       status: "ready",
       telegram: { status: "disabled", reason: null },
     });
+    expect((await server.inject({
+      method: "PUT",
+      url: "/api/settings/notifications",
+      headers,
+      payload: { notifyWhenUnchanged: true },
+    })).json()).toEqual({
+      telegramEnabled: false,
+      notifyWhenUnchanged: false,
+      telegramPhase: "disabled",
+    });
+    expect((await server.inject({
+      method: "PUT",
+      url: "/api/settings/notifications",
+      headers,
+      payload: {},
+    })).statusCode).toBe(400);
   });
 
   it("serves the built React entry page from the same process", async () => {

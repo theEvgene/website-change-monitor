@@ -256,12 +256,7 @@ export function buildHttpServer(
     ));
     apiServer.get("/api/settings/notifications", { schema: getNotificationSettingsRouteSchema }, async () => notificationSettings.state());
     apiServer.put<{ Body: { telegramEnabled?: boolean; notifyWhenUnchanged?: boolean } }>("/api/settings/notifications", { schema: updateNotificationSettingsRouteSchema }, async (request) => {
-      const wasEnabled = notificationSettings.state().telegramEnabled;
       const current = notificationSettings.update(request.body, new Date().toISOString());
-      if (!wasEnabled && current.telegramEnabled) {
-        await telegram.recheck();
-        void telegram.drain();
-      }
       return current;
     });
 

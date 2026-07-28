@@ -35,3 +35,40 @@ it("replays SSE after Last-Event-ID and gives that header priority over the quer
     await server.close(); database.close(); await rm(root, { recursive: true, force: true });
   }
 });
+
+it("replays an event created with Telegram disabled as a neutral delivery", async () => {
+  const root = await mkdtemp(join(tmpdir(), "website-change-monitor-disabled-sse-"));
+  const database = openApplicationDatabase({ rootDirectory: root });
+  const baseline = successfulPageProbeResult("https://example.com", [{ selector: "body", matchCount: 1 }], simplePagePreviewTargets("A"));
+  const changed = successfulPageProbeResult("https://example.com", [{ selector: "body", matchCount: 1 }], simplePagePreviewTargets("B"));
+  const preview = vi.fn<PageProbe["preview"]>().mockResolvedValueOnce(baseline).mockResolvedValueOnce(baseline).mockResolvedValueOnce(changed);
+  const server = buildHttpServer({ database, version: "0.1.0", port: 43220, pageProbe: { preview } });
+  const headers = { host: "127.0.0.1:43220" };
+  try {
+    await server.listen({ host: "127.0.0.1", port: 43220 });
+    const created = await server.inject({
+      method: "POST",
+      url: "/api/monitors",
+      headers,
+      payload: { name: "Catalog", url: "https://example.com", targetSelectors: ["body"], exclusionSelectors: [], intervalHours: 6 },
+    });
+    const monitorId = created.json<{ id: number }>().id;
+    await server.inject({
+      method: "PUT",
+      url: "/api/settings/notifications",
+      headers,
+      payload: { telegramEnabled: false },
+    });
+    await server.inject({ method: "POST", url: `/api/monitors/${monitorId}/checks`, headers });
+
+    const response = await fetch("http://127.0.0.1:43220/api/notifications/stream?after=0", { headers: { accept: "text/event-stream" } });
+    const reader = response.body!.getReader();
+    const chunk = await reader.read();
+    await reader.cancel();
+    const text = new TextDecoder().decode(chunk.value);
+    expect(text).toContain('"kind":"change_detected"');
+    expect(text).toContain('"telegram":{"state":"disabled","failureReason":null}');
+  } finally {
+    await server.close(); database.close(); await rm(root, { recursive: true, force: true });
+  }
+});

@@ -13,6 +13,7 @@ import type {
   NotificationFeed,
   NotificationPolicy,
 } from "../persistence/monitor-store.js";
+import { defaultNotificationPolicy } from "../persistence/monitor-store.js";
 import type { PagePreview, PageProbe } from "./page-probe.js";
 import { PageProbeError } from "./page-probe.js";
 import {
@@ -137,7 +138,7 @@ export function createMonitorService(options: {
   let discardCurrentResult = false;
   const orchestrationTimeoutMs = options.orchestrationTimeoutMs ?? 75_000;
   const notificationPolicy = options.notificationPolicy
-    ?? (() => ({ telegramEnabled: true, notifyWhenUnchanged: false }));
+    ?? (() => defaultNotificationPolicy);
 
   async function prepareNotification(): Promise<void> {
     await options.beforeNotificationCommit?.().catch(() => undefined);

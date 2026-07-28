@@ -89,6 +89,18 @@ describe("Notifications UI", () => {
     expect(await screen.findByRole("dialog", { name: "Сравнение" })).toBeVisible();
   });
 
+  it("shows intentional Telegram disablement without an error reason", async () => {
+    vi.stubGlobal("Notification", class { static permission = "denied"; static requestPermission = vi.fn(); });
+    vi.stubGlobal("EventSource", FakeEventSource);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({
+      highWaterMark: 1,
+      items: [{ ...first, telegram: { state: "disabled", failureReason: null } }],
+    })));
+    render(<NotificationsWorkspace centerVisible selectedCheckId={undefined} onOpenJournal={vi.fn()} />);
+    expect(await screen.findByText("Telegram отключён")).toBeVisible();
+    expect(screen.queryByText("Не отправлено")).not.toBeInTheDocument();
+  });
+
   it("shows denied permission and navigates each event to its context", async () => {
     class DeniedNotification { static permission = "denied"; static requestPermission = vi.fn(); }
     const openJournal = vi.fn();

@@ -204,6 +204,21 @@ describe("Telegram dispatcher", () => {
     expect(fixture.database.monitors.listNotifications().items[0]!.telegram.state).toBe("timeout");
   });
 
+  it("does not invoke the sender while runtime dispatch is disabled", async () => {
+    const fixture = await setup({});
+    const dispatcher = createTelegramDispatcher({
+      store: fixture.database.monitors,
+      executablePath: process.execPath,
+      argsPrefix: [fixture.script],
+      environment: fixture.environment,
+      canDispatch: () => false,
+    });
+    await dispatcher.initialize();
+    seedChange(fixture.database, "Disabled runtime");
+    await dispatcher.drain();
+    expect(fixture.database.monitors.listNotifications().items[0]!.telegram.state).toBe("pending");
+  });
+
   it("does not resend old unavailable delivery after recovery and abandons old pending on restart", async () => {
     const fixture = await setup({ FAKE_AVAILABLE: "0" });
     const first = createTelegramDispatcher({ store: fixture.database.monitors, executablePath: process.execPath, argsPrefix: [fixture.script], environment: fixture.environment });

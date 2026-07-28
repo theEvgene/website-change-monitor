@@ -73,6 +73,32 @@ describe("startup UI", () => {
     expect(within(status).queryByRole("button", { name: "Проверить снова" })).not.toBeInTheDocument();
   });
 
+  it("keeps confirmed settings and shows the existing toast when an update fails", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (input === "/api/version") return Promise.resolve(Response.json({
+        application: "website-change-monitor", apiVersion: "v1", version: "0.1.0",
+      }));
+      if (input === "/api/settings/notifications") {
+        return Promise.resolve(init?.method === "PUT"
+          ? new Response(null, { status: 500 })
+          : Response.json({ telegramEnabled: true, notifyWhenUnchanged: false, telegramPhase: "enabled" }));
+      }
+      if (input === "/api/telegram") return Promise.resolve(Response.json({ status: "available", reason: null }));
+      return Promise.resolve(Response.json({
+        application: "website-change-monitor", status: "ready", version: "0.1.0",
+        database: { status: "ready", schemaVersion: 11 },
+        telegram: { status: "available", reason: null },
+      }));
+    }));
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Настройки" }));
+    const telegramSwitch = screen.getByRole("switch", { name: "Отправлять уведомления в Telegram" });
+    fireEvent.click(telegramSwitch);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось изменить настройки.");
+    expect(telegramSwitch).toBeChecked();
+  });
+
   it("shows the health reported by the local application", async () => {
     const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       if (input === "/api/version") {
@@ -460,6 +486,7 @@ describe("startup UI", () => {
                   beforeSnapshotId: 3,
                   afterSnapshotId: 3,
                   snapshot: null,
+                  telegram: { state: "disabled", failureReason: null },
                 },
                 created.history[0],
               ],
@@ -553,6 +580,7 @@ describe("startup UI", () => {
     expect(
       await within(historyPanel!).findByText("Ручная проверка · Без изменений"),
     ).toBeVisible();
+    expect(within(historyPanel!).getByText("Telegram: Telegram отключён")).toBeVisible();
     expect(await screen.findByRole("status")).toHaveTextContent("Проверка выполнена.");
     expect(within(historyPanel!).getByRole("button", { name: "Запустить сейчас" })).toBeEnabled();
     expect(manualRequested).toBe(true);
@@ -601,6 +629,7 @@ describe("startup UI", () => {
           completedAt: "2026-07-17T09:00:01.000Z",
           errorCode: null, errorMessage: null,
           beforeSnapshotId: 3, afterSnapshotId: 4,
+          telegram: { state: "disabled", failureReason: null },
         }, {
           id: 21, monitorId: 7, monitorName: "Catalog", kind: "scheduled",
           url: "https://example.com/catalog",
@@ -649,6 +678,7 @@ describe("startup UI", () => {
     const resultFilter = within(journal).getByRole("combobox", { name: "Результат" });
     expect(resultFilter).toHaveValue("change");
     expect(await within(journal).findByRole("cell", { name: "Catalog" })).toBeVisible();
+    expect(within(journal).getByRole("cell", { name: "Telegram отключён" })).toBeVisible();
     expect(within(journal).queryByRole("cell", { name: "Окончательная ошибка" })).not.toBeInTheDocument();
     const monitorLinks = within(journal).getAllByRole("link", { name: "Catalog" });
     expect(monitorLinks[0]).toHaveAttribute("href", "https://example.com/catalog");

@@ -10,7 +10,7 @@ export interface NotificationPolicy {
   telegramEnabled: boolean;
   notifyWhenUnchanged: boolean;
 }
-const defaultNotificationPolicy: NotificationPolicy = {
+export const defaultNotificationPolicy: NotificationPolicy = {
   telegramEnabled: true,
   notifyWhenUnchanged: false,
 };
@@ -830,7 +830,7 @@ export function createMonitorStore(
         },
         now,
         nextAt,
-        { telegramEnabled: true, notifyWhenUnchanged: false },
+        defaultNotificationPolicy,
       );
     }
   });

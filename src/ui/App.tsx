@@ -122,7 +122,7 @@ export function App() {
         .then((telegram) => {
           if (telegram === undefined) return;
           setState((current) => current.kind === "loaded"
-            ? { ...current, health: { ...current.health, status: telegram.status === "available" || telegram.status === "disabled" ? "ready" : "degraded", telegram } }
+            ? { ...current, health: { ...current.health, status: healthStatusForTelegram(telegram), telegram } }
             : current);
         })
         .catch(() => undefined);
@@ -213,7 +213,7 @@ export function App() {
     const response = await fetch("/api/telegram/recheck", { method: "POST", headers: { accept: "application/json" } });
     if (!response.ok || state.kind !== "loaded") return;
     const telegram = await response.json() as HealthResponse["telegram"];
-    setState({ ...state, health: { ...state.health, status: telegram.status === "available" || telegram.status === "disabled" ? "ready" : "degraded", telegram } });
+    setState({ ...state, health: { ...state.health, status: healthStatusForTelegram(telegram), telegram } });
   }
 
   async function changeNotificationSetting(patch: { telegramEnabled?: boolean; notifyWhenUnchanged?: boolean }) {
@@ -223,7 +223,7 @@ export function App() {
         method: "PUT", headers: { accept: "application/json", "content-type": "application/json" },
         body: JSON.stringify(patch),
       });
-      if (!response.ok) return;
+      if (!response.ok) throw new Error(`Notification settings update failed: ${response.status}`);
       const settings = await response.json() as { telegramEnabled: boolean; notifyWhenUnchanged: boolean; telegramPhase: "enabled" | "disabled" };
       setTelegramEnabled(settings.telegramEnabled);
       setNotifyWhenUnchanged(settings.notifyWhenUnchanged);
@@ -233,6 +233,8 @@ export function App() {
         const health = await healthResponse.json() as HealthResponse;
         setState((current) => current.kind === "loaded" ? { ...current, health } : current);
       }
+    } catch {
+      setOperationToast({ tone: "error", message: "Не удалось изменить настройки." });
     } finally { setNotificationSettingsBusy(false); }
   }
 
@@ -369,6 +371,10 @@ function systemStatusPresentation(state: HealthState): {
     shortLabel: "Есть ограничения",
     hint: `Telegram недоступен: ${state.health.telegram.reason ?? "канал не настроен"}`,
   };
+}
+
+function healthStatusForTelegram(telegram: HealthResponse["telegram"]): HealthResponse["status"] {
+  return telegram.status === "available" || telegram.status === "disabled" ? "ready" : "degraded";
 }
 
 function sectionFromLocation(): "monitors" | "journal" | "notifications" {

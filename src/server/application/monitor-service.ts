@@ -128,6 +128,8 @@ const snapshotLimits = {
   textLines: 20_000,
   bytes: 8 * 1024 * 1024,
 } as const;
+const diagnosticRetentionMs = 14 * 24 * 60 * 60 * 1_000;
+const diagnosticCleanupIntervalMs = 24 * 60 * 60 * 1_000;
 
 export function createMonitorService(options: {
   database: ApplicationDatabase;
@@ -145,6 +147,7 @@ export function createMonitorService(options: {
   let consecutiveManualChecks = 0;
   let stopping = false;
   let discardCurrentResult = false;
+  let nextDiagnosticCleanupAt = 0;
   const orchestrationTimeoutMs = options.orchestrationTimeoutMs ?? 75_000;
   const notificationPolicy = options.notificationPolicy
     ?? (() => defaultNotificationPolicy);
@@ -175,8 +178,28 @@ export function createMonitorService(options: {
     }
   }
 
+  function cleanupDiagnosticsIfDue(): void {
+    const now = clock.now();
+    if (now.getTime() < nextDiagnosticCleanupAt) return;
+    const cutoff = new Date(now.getTime() - diagnosticRetentionMs).toISOString();
+    try {
+      options.database.monitors.deleteCheckDiagnosticsBefore(cutoff);
+      nextDiagnosticCleanupAt = now.getTime() + diagnosticCleanupIntervalMs;
+    } catch {
+      try {
+        options.logger?.write("check_diagnostic_cleanup_failed", {
+          stage: "persistence",
+          message: "Expired Check diagnostics were not deleted.",
+        });
+      } catch {
+        // Cleanup and its operational fallback are both best-effort.
+      }
+    }
+  }
+
   async function drainChecks(): Promise<void> {
     if (stopping) return;
+    cleanupDiagnosticsIfDue();
     const now = clock.now().toISOString();
     if (recoverOverdue) options.database.monitors.recoverInterrupted(now);
     options.database.monitors.reconcileSchedule(now, recoverOverdue);
@@ -349,7 +372,10 @@ export function createMonitorService(options: {
       };
     },
     getCheckDiagnostic: (id) =>
-      options.database.monitors.getCheckDiagnostic(id),
+      options.database.monitors.getCheckDiagnostic(
+        id,
+        new Date(clock.now().getTime() - diagnosticRetentionMs).toISOString(),
+      ),
     getMonitor: (id) => options.database.monitors.getMonitor(id),
     async setPaused(id, paused) {
       const updated = options.database.monitors.setPaused(

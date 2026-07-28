@@ -612,7 +612,7 @@ export const checkDiagnosticResponseSchemaV1 = {
     checkId: { type: "integer", minimum: 1 },
     availability: {
       type: "string",
-      enum: ["available", "not_applicable", "unavailable"],
+      enum: ["available", "not_applicable", "expired", "unavailable"],
     },
     diagnostic: {
       anyOf: [

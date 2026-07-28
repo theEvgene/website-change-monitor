@@ -114,6 +114,13 @@ describe("public HTTP contract", () => {
       required: expect.arrayContaining(["url"]),
       properties: { url: { type: "string", format: "uri" } },
     });
+    expect(document.components.schemas.CheckDiagnosticResponseV1).toMatchObject({
+      properties: {
+        availability: {
+          enum: ["available", "not_applicable", "expired", "unavailable"],
+        },
+      },
+    });
     expect(document.components.schemas.PreviewRequestV1).toMatchObject({
       required: ["url", "targetSelectors", "exclusionSelectors"],
       properties: {

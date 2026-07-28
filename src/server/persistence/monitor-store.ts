@@ -180,7 +180,7 @@ export type CheckDiagnosticLookup =
     }
   | {
       checkId: number;
-      availability: "not_applicable" | "unavailable";
+      availability: "not_applicable" | "expired" | "unavailable";
       diagnostic: null;
     };
 
@@ -220,7 +220,11 @@ export interface MonitorStore {
     policy: NotificationPolicy,
   ): void;
   recordCheckDiagnostic(checkId: number, diagnostic: CheckDiagnosticInput): void;
-  getCheckDiagnostic(checkId: number): CheckDiagnosticLookup | undefined;
+  deleteCheckDiagnosticsBefore(recordedBefore: string): number;
+  getCheckDiagnostic(
+    checkId: number,
+    expiredBefore: string,
+  ): CheckDiagnosticLookup | undefined;
   setPaused(monitorId: number, paused: boolean, now: string): boolean | undefined;
   listMonitors(label?: string): MonitorSummaryRecord[];
   listLabels(): string[];
@@ -531,6 +535,13 @@ export function createMonitorStore(
       selectorIndex: normalized.selectorIndex ?? null,
     });
   }
+  const deleteCheckDiagnostics = database.prepare(`
+    DELETE FROM check_diagnostics WHERE recorded_at < ?
+  `);
+  const deleteCheckDiagnosticsTransaction = database.transaction(
+    (recordedBefore: string) =>
+      deleteCheckDiagnostics.run(recordedBefore).changes,
+  );
   const finishIntent = database.prepare(`
     UPDATE check_intents
     SET state = 'finished', finished_at = ?
@@ -960,10 +971,11 @@ export function createMonitorStore(
     completeChange: completeChangeTransaction,
     failCheck: failCheckTransaction,
     recordCheckDiagnostic,
-    getCheckDiagnostic(checkId) {
+    deleteCheckDiagnosticsBefore: deleteCheckDiagnosticsTransaction,
+    getCheckDiagnostic(checkId, expiredBefore) {
       const row = database.prepare(`
         SELECT
-          c.id check_id, c.result,
+          c.id check_id, c.result, c.completed_at,
           d.recorded_at, d.stage, d.final_url, d.http_status, d.total_ms,
           d.navigation_ms, d.target_ms, d.scroll_ms, d.stability_ms,
           d.extraction_ms, d.selector_field, d.selector_index
@@ -973,6 +985,7 @@ export function createMonitorStore(
       `).get(checkId) as {
         check_id: number;
         result: CheckResult | null;
+        completed_at: string | null;
         recorded_at: string | null;
         stage: CheckDiagnosticStage | null;
         final_url: string | null;
@@ -995,6 +1008,12 @@ export function createMonitorStore(
         row.stage === null ||
         row.total_ms === null
       ) {
+        if (
+          row.completed_at !== null &&
+          row.completed_at < expiredBefore
+        ) {
+          return { checkId, availability: "expired", diagnostic: null };
+        }
         return { checkId, availability: "unavailable", diagnostic: null };
       }
       return {

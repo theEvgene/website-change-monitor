@@ -142,6 +142,63 @@ describe("application start", () => {
     }
   });
 
+  it("becomes ready while a due check continues in the background", async () => {
+    const { root, staticRoot } = await applicationFixture();
+    const port = await freePort();
+    const database = openApplicationDatabase({ rootDirectory: root });
+    const monitorId = database.monitors.createMonitor({
+      name: "Catalog", url: "https://example.com/catalog",
+      targetSelectors: [".card"], exclusionSelectors: [], intervalHours: 6,
+    }, new Date(Date.now() - 1_000).toISOString());
+
+    let markPreviewStarted: (() => void) | undefined;
+    const previewStarted = new Promise<void>((resolveStarted) => {
+      markPreviewStarted = resolveStarted;
+    });
+    let releasePreview: (() => void) | undefined;
+    const previewReleased = new Promise<void>((resolveReleased) => {
+      releasePreview = resolveReleased;
+    });
+    const preview = vi.fn(async () => {
+      markPreviewStarted?.();
+      await previewReleased;
+      return successfulPageProbeResult(
+        "https://example.com/catalog",
+        [{ selector: ".card", matchCount: 1 }],
+        simplePagePreviewTargets("Product"),
+      );
+    });
+    const server = buildHttpServer({
+      database,
+      version: "0.1.0",
+      port,
+      staticRoot,
+      pageProbe: { preview },
+    });
+    const listening = server.listen({ host: "127.0.0.1", port });
+
+    try {
+      await previewStarted;
+      await expect(Promise.race([
+        listening.then(() => "ready"),
+        new Promise<string>((resolve) => setTimeout(() => resolve("blocked"), 1_000)),
+      ])).resolves.toBe("ready");
+      releasePreview?.();
+      await vi.waitFor(async () => {
+        const response = await fetch(`http://127.0.0.1:${port}/api/monitors/${monitorId}`);
+        await expect(response.json()).resolves.toMatchObject({
+          history: [{ kind: "scheduled", result: "baseline" }],
+        });
+      });
+    } finally {
+      releasePreview?.();
+      await listening.catch(() => undefined);
+      await server.close();
+      database.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("opens the UI of an existing Website Change Monitor instance", async () => {
     const { root, staticRoot } = await applicationFixture();
     const port = await freePort();

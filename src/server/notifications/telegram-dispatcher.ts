@@ -126,14 +126,14 @@ function payload(
       logChangeDetailsFailure(logger, job, "comparison_data", errorName(error));
       return telegramPayload(job, message);
     }
-    if (pair === undefined) {
+    if (pair === undefined || pair.status !== "found") {
       logChangeDetailsFailure(logger, job, "comparison_data", "ComparisonDataUnavailable");
     } else {
       let comparison;
       try {
         comparison = detailPreparation.compare(
-          pair.beforeCanonicalJson,
-          pair.afterCanonicalJson,
+          pair.pair.beforeCanonicalJson,
+          pair.pair.afterCanonicalJson,
         );
       } catch (error: unknown) {
         logChangeDetailsFailure(logger, job, "comparison", errorName(error));

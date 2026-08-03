@@ -550,7 +550,8 @@ export const comparisonResponseSchemaV1 = {
   additionalProperties: false,
   required: [
     "checkId", "monitorId", "monitorName", "beforeSnapshotId",
-    "afterSnapshotId", "complete", "targets",
+    "afterSnapshotId", "beforeCreatedAt", "afterCreatedAt",
+    "eligibleBeforeSnapshots", "complete", "targets",
   ],
   properties: {
     checkId: { type: "integer", minimum: 1 },
@@ -558,6 +559,15 @@ export const comparisonResponseSchemaV1 = {
     monitorName: { type: "string" },
     beforeSnapshotId: { type: "integer", minimum: 1 },
     afterSnapshotId: { type: "integer", minimum: 1 },
+    beforeCreatedAt: { type: "string", format: "date-time" },
+    afterCreatedAt: { type: "string", format: "date-time" },
+    eligibleBeforeSnapshots: {
+      type: "array",
+      items: {
+        type: "object", additionalProperties: false, required: ["id", "createdAt"],
+        properties: { id: { type: "integer", minimum: 1 }, createdAt: { type: "string", format: "date-time" } },
+      },
+    },
     complete: { type: "boolean" },
     targets: {
       type: "array",
@@ -828,8 +838,10 @@ export const getComparisonRouteSchema: FastifySchema = {
   operationId: "getComparison",
   summary: "Получить Сравнение пары Снимков Проверки",
   params: checkIdParams,
+  querystring: { type: "object", additionalProperties: false, properties: { initialSnapshotId: { type: "integer", minimum: 1 } } },
   response: {
     200: { $ref: "ComparisonResponseV1#" },
+    400: { $ref: "ApiErrorV1#" },
     404: { $ref: "ApiErrorV1#" },
     ...commonErrors,
   },

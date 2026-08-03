@@ -166,7 +166,14 @@ export interface ComparisonSnapshotPair {
   afterSnapshotId: number;
   beforeCanonicalJson: string;
   afterCanonicalJson: string;
+  beforeCreatedAt: string;
+  afterCreatedAt: string;
+  eligibleBeforeSnapshots: Array<{ id: number; createdAt: string }>;
 }
+
+export type ComparisonLookup =
+  | { status: "found"; pair: ComparisonSnapshotPair }
+  | { status: "invalid_initial"; reason: "unknown" | "different_monitor" | "different_scope" | "not_earlier" };
 
 export interface CheckDiagnosticRecord extends CheckDiagnosticInput {
   checkId: number;
@@ -230,7 +237,7 @@ export interface MonitorStore {
   listLabels(): string[];
   listJournal(): JournalCheckRecord[];
   listActiveIntents(): CheckIntentRecord[];
-  getComparison(checkId: number): ComparisonSnapshotPair | undefined;
+  getComparison(checkId: number, initialSnapshotId?: number): ComparisonLookup | undefined;
   getMonitor(id: number): MonitorRecord | undefined;
   listNotifications(afterId?: number): NotificationFeed;
   listLiveNotifications(afterId?: number): NotificationFeed;
@@ -1168,42 +1175,51 @@ export function createMonitorStore(
         telegram: row.telegram_state === null ? null : { state: row.telegram_state, failureReason: row.telegram_failure_reason },
       }));
     },
-    getComparison(checkId) {
-      const row = database
-        .prepare(`
-          SELECT c.id check_id, c.monitor_id, m.name monitor_name,
-                 before_snapshot.id before_snapshot_id,
-                 after_snapshot.id after_snapshot_id,
-                 before_snapshot.canonical_json before_json,
-                 after_snapshot.canonical_json after_json
-          FROM checks c
-          JOIN monitors m ON m.id = c.monitor_id
-          JOIN snapshots before_snapshot ON before_snapshot.id = c.before_snapshot_id
-          JOIN snapshots after_snapshot ON after_snapshot.id = c.after_snapshot_id
-          WHERE c.id = ?
-        `)
-        .get(checkId) as
-        | {
-            check_id: number;
-            monitor_id: number;
-            monitor_name: string;
-            before_snapshot_id: number;
-            after_snapshot_id: number;
-            before_json: Buffer;
-            after_json: Buffer;
-          }
-        | undefined;
-      return row === undefined
-        ? undefined
-        : {
-            checkId: row.check_id,
-            monitorId: row.monitor_id,
-            monitorName: row.monitor_name,
-            beforeSnapshotId: row.before_snapshot_id,
-            afterSnapshotId: row.after_snapshot_id,
-            beforeCanonicalJson: row.before_json.toString("utf8"),
-            afterCanonicalJson: row.after_json.toString("utf8"),
-          };
+    getComparison(checkId, initialSnapshotId) {
+      const row = database.prepare(`
+        SELECT c.id check_id, c.monitor_id, c.scope_revision, m.name monitor_name,
+               before_snapshot.id before_snapshot_id, after_snapshot.id after_snapshot_id,
+               before_snapshot.canonical_json before_json, after_snapshot.canonical_json after_json,
+               before_snapshot.created_at before_created_at, after_snapshot.created_at after_created_at
+        FROM checks c
+        JOIN monitors m ON m.id = c.monitor_id
+        JOIN snapshots before_snapshot ON before_snapshot.id = c.before_snapshot_id
+        JOIN snapshots after_snapshot ON after_snapshot.id = c.after_snapshot_id
+        WHERE c.id = ?
+      `).get(checkId) as {
+        check_id: number; monitor_id: number; scope_revision: number; monitor_name: string;
+        before_snapshot_id: number; after_snapshot_id: number;
+        before_json: Buffer; after_json: Buffer; before_created_at: string; after_created_at: string;
+      } | undefined;
+      if (row === undefined) return undefined;
+
+      let before = { id: row.before_snapshot_id, canonical_json: row.before_json, created_at: row.before_created_at };
+      if (initialSnapshotId !== undefined) {
+        const selected = database.prepare(`
+          SELECT id, monitor_id, scope_revision, canonical_json, created_at FROM snapshots WHERE id = ?
+        `).get(initialSnapshotId) as { id: number; monitor_id: number; scope_revision: number; canonical_json: Buffer; created_at: string } | undefined;
+        if (selected === undefined) return { status: "invalid_initial", reason: "unknown" };
+        if (selected.monitor_id !== row.monitor_id) return { status: "invalid_initial", reason: "different_monitor" };
+        if (selected.scope_revision !== row.scope_revision) return { status: "invalid_initial", reason: "different_scope" };
+        if (selected.id >= row.after_snapshot_id) return { status: "invalid_initial", reason: "not_earlier" };
+        before = selected;
+      }
+      const eligible = database.prepare(`
+        SELECT id, created_at FROM snapshots
+        WHERE monitor_id = ? AND scope_revision = ? AND id < ?
+        ORDER BY id DESC
+      `).all(row.monitor_id, row.scope_revision, row.after_snapshot_id) as Array<{ id: number; created_at: string }>;
+      return {
+        status: "found",
+        pair: {
+          checkId: row.check_id, monitorId: row.monitor_id, monitorName: row.monitor_name,
+          beforeSnapshotId: before.id, afterSnapshotId: row.after_snapshot_id,
+          beforeCanonicalJson: before.canonical_json.toString("utf8"),
+          afterCanonicalJson: row.after_json.toString("utf8"),
+          beforeCreatedAt: before.created_at, afterCreatedAt: row.after_created_at,
+          eligibleBeforeSnapshots: eligible.map((snapshot) => ({ id: snapshot.id, createdAt: snapshot.created_at })),
+        },
+      };
     },
     getMonitor(id) {
       const row = database

@@ -93,6 +93,12 @@ export class SnapshotError extends Error {
   }
 }
 
+export class ComparisonSelectionError extends Error {
+  constructor(readonly reason: "unknown" | "different_monitor" | "different_scope" | "not_earlier") {
+    super("Недопустимый начальный Снимок для Сравнения.");
+    this.name = "ComparisonSelectionError";
+  }
+}
 export interface MonitorService {
   createMonitor(input: CreateMonitorInput): Promise<MonitorView>;
   updateMonitor(id: number, input: UpdateMonitorInput): Promise<MonitorView | undefined>;
@@ -104,13 +110,16 @@ export interface MonitorService {
   listActiveIntents(): CheckIntentRecord[];
   listNotifications(afterId?: number): NotificationFeed;
   listLiveNotifications(afterId?: number): NotificationFeed;
-  getComparison(id: number):
+  getComparison(id: number, initialSnapshotId?: number):
     | (SnapshotComparison & {
         checkId: number;
         monitorId: number;
         monitorName: string;
         beforeSnapshotId: number;
         afterSnapshotId: number;
+        beforeCreatedAt: string;
+        afterCreatedAt: string;
+        eligibleBeforeSnapshots: Array<{ id: number; createdAt: string }>;
       })
     | undefined;
   getCheckDiagnostic(id: number): CheckDiagnosticLookup | undefined;
@@ -355,19 +364,17 @@ export function createMonitorService(options: {
     listActiveIntents: () => options.database.monitors.listActiveIntents(),
     listNotifications: (afterId) => options.database.monitors.listNotifications(afterId),
     listLiveNotifications: (afterId) => options.database.monitors.listLiveNotifications(afterId),
-    getComparison(id) {
-      const pair = options.database.monitors.getComparison(id);
-      if (pair === undefined) return undefined;
-      const comparison = compareSnapshots(
-        pair.beforeCanonicalJson,
-        pair.afterCanonicalJson,
-      );
+    getComparison(id, initialSnapshotId) {
+      const lookup = options.database.monitors.getComparison(id, initialSnapshotId);
+      if (lookup === undefined) return undefined;
+      if (lookup.status === "invalid_initial") throw new ComparisonSelectionError(lookup.reason);
+      const pair = lookup.pair;
+      const comparison = compareSnapshots(pair.beforeCanonicalJson, pair.afterCanonicalJson);
       return {
-        checkId: pair.checkId,
-        monitorId: pair.monitorId,
-        monitorName: pair.monitorName,
-        beforeSnapshotId: pair.beforeSnapshotId,
-        afterSnapshotId: pair.afterSnapshotId,
+        checkId: pair.checkId, monitorId: pair.monitorId, monitorName: pair.monitorName,
+        beforeSnapshotId: pair.beforeSnapshotId, afterSnapshotId: pair.afterSnapshotId,
+        beforeCreatedAt: pair.beforeCreatedAt, afterCreatedAt: pair.afterCreatedAt,
+        eligibleBeforeSnapshots: pair.eligibleBeforeSnapshots,
         ...comparison,
       };
     },

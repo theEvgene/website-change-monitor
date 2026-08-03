@@ -6,6 +6,7 @@ import type { ServerResponse } from "node:http";
 import { PageProbeError, type PageProbe } from "../application/page-probe.js";
 import {
   createMonitorService,
+  ComparisonSelectionError,
   MonitorInputError,
   MonitorScopeResetRequired,
   MonitorDeleteConfirmationError,
@@ -578,20 +579,24 @@ export function buildHttpServer(
       },
     );
 
-    apiServer.get<{ Params: { checkId: number } }>(
+    apiServer.get<{ Params: { checkId: number }; Querystring: { initialSnapshotId?: number } }>(
       "/api/checks/:checkId/comparison",
       { schema: getComparisonRouteSchema },
       async (request, reply) => {
-        const comparison = monitors.getComparison(request.params.checkId);
-        if (comparison === undefined) {
-          return reply
-            .code(404)
-            .send(apiError("not_found", "Сравнение для Проверки не найдено."));
+        try {
+          const comparison = monitors.getComparison(request.params.checkId, request.query.initialSnapshotId);
+          if (comparison === undefined) {
+            return reply.code(404).send(apiError("not_found", "Сравнение для Проверки не найдено."));
+          }
+          return comparison;
+        } catch (error) {
+          if (error instanceof ComparisonSelectionError) {
+            return reply.code(400).send(apiError("invalid_request", error.message));
+          }
+          throw error;
         }
-        return comparison;
       },
     );
-
     apiServer.get(
       "/openapi.json",
       { schema: { hide: true } },

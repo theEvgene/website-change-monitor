@@ -116,6 +116,7 @@ async function runCli(
         ...process.env,
         LOCALAPPDATA: localAppData,
         WEBSITE_CHANGE_MONITOR_BROWSER_PATH: process.execPath,
+        WEBSITE_CHANGE_MONITOR_TEST_WINDOWS_RELEASE: "10.0.22631",
       },
       stdio: ["ignore", "pipe", "pipe"],
     },

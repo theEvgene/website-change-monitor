@@ -184,7 +184,9 @@ function currentRuntime() {
     nodeVersion: process.versions.node,
     platform: process.platform,
     architecture: process.arch,
-    windowsRelease: release(),
+    windowsRelease: process.env.VITEST === "true"
+      ? (process.env.WEBSITE_CHANGE_MONITOR_TEST_WINDOWS_RELEASE ?? release())
+      : release(),
   };
 }
 

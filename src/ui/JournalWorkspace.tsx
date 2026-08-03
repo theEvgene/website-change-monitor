@@ -40,7 +40,7 @@ export function JournalWorkspace({
 }) {
   const [checks, setChecks] = useState<JournalCheck[]>([]);
   const [failed, setFailed] = useState(false);
-  const [comparison, setComparison] = useState<ComparisonResponse | null>(null);
+  const [comparisonCheckId, setComparisonCheckId] = useState<number | null>(null);
   const [manualBusyMonitorIds, setManualBusyMonitorIds] = useState<Set<number>>(new Set());
 
   const loadJournal = useCallback(async (signal?: AbortSignal) => {
@@ -95,7 +95,7 @@ export function JournalWorkspace({
               <td>{check.telegram == null ? "—" : telegramDeliveryLabel(check.telegram.state)}{check.telegram?.failureReason == null ? null : <small>{check.telegram.failureReason}</small>}</td>
               <td><div className="journal-actions">
                 {hasComparableSnapshots(check) ? (
-                  <button className="table-link" type="button" onClick={() => void openComparison(check.id)}>
+                  <button className="table-link" type="button" onClick={() => setComparisonCheckId(check.id)}>
                     Открыть сравнение
                   </button>
                 ) : null}
@@ -112,14 +112,10 @@ export function JournalWorkspace({
           );})}</tbody>
         </table>
       ) : null}
-      {comparison === null ? null : <ComparisonModal comparison={comparison} onClose={() => setComparison(null)} />}
+      {comparisonCheckId === null ? null : <ComparisonModal checkId={comparisonCheckId} onClose={() => setComparisonCheckId(null)} />}
     </section>
   );
 
-  async function openComparison(checkId: number) {
-    const loaded = await loadComparison(checkId);
-    if (loaded !== null) setComparison(loaded);
-  }
 
   async function requestManualCheck(monitorId: number) {
     setManualBusyMonitorIds((current) => new Set(current).add(monitorId));

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { ComparisonModal, loadComparison, type ComparisonResponse } from "./ComparisonModal.js";
+import { ComparisonModal } from "./ComparisonModal.js";
 import { telegramDeliveryLabel, type TelegramDeliveryView } from "./telegram-delivery.js";
 
 interface NotificationEvent {
@@ -24,7 +24,7 @@ interface NotificationFeed { highWaterMark: number; items: NotificationEvent[] }
 
 export function NotificationsWorkspace({ centerVisible, selectedCheckId, onOpenJournal }: { centerVisible: boolean; selectedCheckId: number | undefined; onOpenJournal: (checkId: number) => void }) {
   const [items, setItems] = useState<NotificationEvent[]>([]);
-  const [comparison, setComparison] = useState<ComparisonResponse | null>(null);
+  const [comparisonCheckId, setComparisonCheckId] = useState<number | null>(null);
   const [permission, setPermission] = useState<NotificationPermission | "unsupported">(
     notificationPermission(),
   );
@@ -70,7 +70,7 @@ export function NotificationsWorkspace({ centerVisible, selectedCheckId, onOpenJ
   }, []);
 
   useEffect(() => {
-    if (centerVisible && selectedCheckId !== undefined) void openComparison(selectedCheckId);
+    if (centerVisible && selectedCheckId !== undefined) setComparisonCheckId(selectedCheckId);
   }, [centerVisible, selectedCheckId]);
 
   return <><section className="journal-panel" aria-label="Уведомления" hidden={!centerVisible}>
@@ -84,11 +84,11 @@ export function NotificationsWorkspace({ centerVisible, selectedCheckId, onOpenJ
         <td>{event.monitorName}</td><td><strong>{event.title}</strong><br />{event.body}</td>
         <td>{telegramDeliveryLabel(event.telegram.state)}{event.telegram.failureReason === null ? null : <small>{event.telegram.failureReason}</small>}</td>
         <td>{event.kind === "change_detected"
-          ? <button className="table-link" type="button" onClick={() => void openComparison(event.checkId)}>Открыть сравнение</button>
+          ? <button className="table-link" type="button" onClick={() => setComparisonCheckId(event.checkId)}>Открыть сравнение</button>
           : <button className="table-link" type="button" onClick={() => onOpenJournal(event.checkId)}>Открыть проверку</button>}</td>
       </tr>)}</tbody>
     </table>}
-    {comparison === null ? null : <ComparisonModal comparison={comparison} onClose={() => setComparison(null)} />}
+    {comparisonCheckId === null ? null : <ComparisonModal checkId={comparisonCheckId} onClose={() => setComparisonCheckId(null)} />}
   </section></>;
 
   function append(event: NotificationEvent, live: boolean) {
@@ -102,10 +102,6 @@ export function NotificationsWorkspace({ centerVisible, selectedCheckId, onOpenJ
     setPermission(await Notification.requestPermission());
   }
 
-  async function openComparison(checkId: number) {
-    const loaded = await loadComparison(checkId);
-    if (loaded !== null) setComparison(loaded);
-  }
 }
 
 function deliverBrowserNotification(event: NotificationEvent): void {

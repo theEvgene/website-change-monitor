@@ -53,7 +53,7 @@ export function MonitorsWorkspace({ refreshToken, onManualCheckResult }: { refre
   const [manualBusy, setManualBusy] = useState(false);
   const [pauseBusy, setPauseBusy] = useState(false);
   const [pauseError, setPauseError] = useState<string | null>(null);
-  const [comparison, setComparison] = useState<ComparisonResponse | null>(null);
+  const [comparisonCheckId, setComparisonCheckId] = useState<number | null>(null);
   const [labelFilter, setLabelFilter] = useState("");
   const [availableLabels, setAvailableLabels] = useState<string[]>([]);
   const [editError, setEditError] = useState<string | null>(null);
@@ -156,7 +156,7 @@ export function MonitorsWorkspace({ refreshToken, onManualCheckResult }: { refre
                   {check.errorMessage === null ? null : <small>{check.errorMessage}</small>}
                   {check.telegram == null ? null : <small>Telegram: {telegramDeliveryLabel(check.telegram.state)}{check.telegram.failureReason === null ? "" : ` — ${check.telegram.failureReason}`}</small>}
                   {hasComparableSnapshots(check) ? (
-                    <button className="table-link" type="button" onClick={() => void openComparison(check.id)}>
+                    <button className="table-link" type="button" onClick={() => setComparisonCheckId(check.id)}>
                       Открыть сравнение
                     </button>
                   ) : null}
@@ -167,14 +167,10 @@ export function MonitorsWorkspace({ refreshToken, onManualCheckResult }: { refre
           </>
         )}
       </aside>
-      {comparison === null ? null : <ComparisonModal comparison={comparison} onClose={() => setComparison(null)} />}
+      {comparisonCheckId === null ? null : <ComparisonModal checkId={comparisonCheckId} onClose={() => setComparisonCheckId(null)} />}
     </section>
   );
 
-  async function openComparison(checkId: number) {
-    const loaded = await loadComparison(checkId);
-    if (loaded !== null) setComparison(loaded);
-  }
 
   async function requestManualCheck(id: number) {
     setManualBusy(true);

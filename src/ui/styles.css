@@ -488,6 +488,19 @@ main {
 
 .comparison-text-diff { margin-top: 4px; }
 
+.request-loading,
+.request-error,
+.comparison-empty {
+  min-height: 180px;
+  display: grid;
+  place-items: center;
+  text-align: center;
+}
+
+.request-error { align-content: center; gap: 12px; }
+.request-error p { margin: 0; }
+.request-error .secondary-button { justify-self: center; }
+
 .diff-row pre {
   min-height: 32px;
   margin: 0;

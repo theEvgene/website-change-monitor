@@ -137,11 +137,11 @@ export function buildHttpServer(
 
   server.addHook("onReady", async () => {
     await telegram.initialize();
-    await monitors.runAvailableChecks();
     workerTimer = setInterval(() => {
       void monitors.runAvailableChecks();
     }, options.workerIntervalMs ?? 1_000);
     workerTimer.unref();
+    void monitors.runAvailableChecks();
   });
 
   server.addHook("onClose", async () => {
